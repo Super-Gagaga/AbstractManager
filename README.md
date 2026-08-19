@@ -1,28 +1,107 @@
-# AbstractManager 缓存管理框架 - 使用指南
+# AbstractManager
+
+> 基于 Go 泛型的缓存管理框架:一套 `ServiceManager` 统一管理 **Redis 缓存 ↔ 关系型数据库** 的读写与同步,四个自动化路由组直接生成标准 RESTful API,无需手写路由处理函数。
+
+[![Go](https://github.com/Super-Gagaga/AbstractManager/actions/workflows/go.yml/badge.svg)](https://github.com/Super-Gagaga/AbstractManager/actions/workflows/go.yml)
+[![Go Version](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 ## 目录
 
-- [项目概述](#项目概述)
+- [特性](#特性)
+- [架构设计](#架构设计)
 - [快速开始](#快速开始)
-- [示例代码解读](#示例代码解读)
-- [API 接口详解](#api-接口详解)
+- [核心组件](#核心组件)
+- [HTTP API 参考](#http-api-参考)
 - [过滤器系统](#过滤器系统)
-- [未来功能预告](#未来功能预告)
+- [Cache Aside 模式](#cache-aside-模式)
+- [配置项一览](#配置项一览)
+- [测试](#测试)
+- [项目结构](#项目结构)
+- [路线图](#路线图)
+- [相关文档](#相关文档)
+- [许可证](#许可证)
 
 ---
 
-## 项目概述
+## 特性
 
-AbstractManager 是一个基于 Go 的缓存管理框架，旨在简化 Redis 缓存与数据库之间的数据同步操作。本框架提供了：
+- **泛型业务层 `ServiceManager[T]`**:一个类型参数同时覆盖 DDL、单条/批量数据库读写、缓存读写与缓存维护,自动从模型推导表名与缓存 key。
+- **自动化 RESTful 路由**:四个路由组(`WriteRouterGroup` / `QueryRouterGroup` / `WritedownRouterGroup` / `LookupRouterGroup`)注册即得完整 API,只暴露需要的部分。
+- **Cache Aside 一等公民**:单键查询自动走"先缓存、未命中回源 DB 并回填"流程,支持命中续期、TTL 环境变量统一配置。
+- **统一过滤器系统**:同一份 JSON 过滤条件(`filters`)可同时翻译为 GORM 查询和 Redis 内存过滤,11 种操作符,两个后端语义一致。
+- **缓存一致性工具箱**:乐观版本写入(WATCH/TxPipeline)、分布式锁防击穿、异步回填工作池、模式化失效、缓存预热与增量写入。
+- **面向批量性能**:Redis Pipeline 批量读写、MGET 批量过滤、SCAN 游标遍历(生产安全替代 KEYS)、数据库批量 Upsert 与分批提交。
+- **安全默认值**:SQL 标识符正则校验(防注入)、REPEATABLE READ 事务写入、可配置的 DB/Redis/DDL 分级超时。
 
-- **统一的缓存写入接口**：支持单条、批量、版本化写入
-- **灵活的缓存查询能力**：支持模式匹配、条件过滤、自定义业务过滤器
-- **分层架构设计**：清晰分离环境初始化、基础设施、业务服务和 HTTP 路由层
-- **高性能批量操作**：使用 Redis Pipeline 和 MGET 优化批量读写性能
+---
+
+## 架构设计
+
+### 分层架构
+
+示例与应用按四层组织,框架代码本身对应业务服务层与 HTTP 路由层:
+
+```
+┌─────────────────────────────────────┐
+│   1. 环境初始化层 (initEnv)          │  加载 .env 配置
+├─────────────────────────────────────┤
+│   2. 基础设施层 (initInfra)          │  InitDB / InitRedis 连接池
+├─────────────────────────────────────┤
+│   3. 业务服务层 (ServiceManager)     │  泛型 CRUD + 缓存同步
+├─────────────────────────────────────┤
+│   4. HTTP 路由层 (http_router)       │  四个路由组 → RESTful API
+└─────────────────────────────────────┘
+```
+
+### 数据流转
+
+**Cache Aside 读数据**(单键查询 `GET /lookup/:key`):
+
+```mermaid
+flowchart TD
+    A[客户端发起读请求] --> B{查 Redis 缓存}
+    B -- 命中 --> C[可选:按配置刷新 TTL] --> D[返回数据 source=cache]
+    B -- 未命中 --> E[查 MySQL 数据库]
+    E -- 查到 --> F[JSON 序列化写入 Redis 并设置 TTL] --> G[返回数据 source=database]
+    E -- 没查到 --> H[返回 404]
+```
+
+**缓存 → 数据库批量同步**(示例中的定时任务):
+
+```mermaid
+flowchart TD
+    A[触发同步(定时任务/手动)] --> B[SCAN 按 key 模式批量读 Redis]
+    B -- 无数据 --> C[结束]
+    B -- 有数据 --> D[过滤、整理为对象列表]
+    D --> E[批量 Upsert 写入 MySQL]
+    E --> F{是否重新缓存?}
+    F -- 是 --> G[Pipeline 回写 Redis 并设置 TTL]
+    F -- 否 --> H[返回同步结果(扫描数/同步数/耗时)]
+    G --> H
+```
+
+**程序启动流程**:
+
+```mermaid
+flowchart TD
+    A[main 启动] --> B[加载 .env]
+    B --> C[连接 MySQL + Redis]
+    C --> D[创建 ServiceManager 并建表]
+    D --> E[可选:启动定时同步任务]
+    E --> F[注册路由组]
+    F --> G[监听端口,优雅关闭]
+```
 
 ---
 
 ## 快速开始
+
+### 环境要求
+
+- Go 1.24+
+- MySQL(通过 GORM MySQL 驱动连接)
+- Redis
 
 ### 安装
 
@@ -30,7 +109,7 @@ AbstractManager 是一个基于 Go 的缓存管理框架，旨在简化 Redis �
 go get github.com/Super-Gagaga/AbstractManager
 ```
 
-本框架根目录不包含 Go 文件，请按需导入子包：
+框架根目录没有 Go 文件,请按需导入子包:
 
 ```go
 import (
@@ -41,950 +120,554 @@ import (
 
 > 国内网络环境可使用 `GOPROXY=https://goproxy.cn,direct` 加速下载。
 
-### 环境要求
-
-- Go 1.24
-- Redis 服务
-- MySQL/PostgreSQL 等关系型数据库
-
 ### 配置环境变量
 
-创建 `.env` 文件（可参考仓库中的 [.env.example](./.env.example)）：
+复制 [.env.example](./.env.example) 为 `.env` 并填入真实配置(完整变量清单见[配置项一览](#配置项一览)):
 
 ```env
-DB_USER=your_db_user
-DB_PASSWORD=your_db_password
-DB_HOST=localhost
+# --- DB ---
+DB_HOST=127.0.0.1
 DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=your_password
 DB_NAME=your_database
 
-# Redis 配置
+# --- Redis ---
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
+# REDIS_PASSWORD=
 
-# 服务配置
-SERVER_PORT=8080
+# --- 服务 ---
+PORT=8080
 
-
-# Cache Aside Configuration
-# TTL when data is loaded from DB and cached (seconds)
-CACHE_ASIDE_TTL=11  
-
-# Refresh TTL on cache hit
-# true: extend cache lifetime on every read
-# false: keep original TTL
+# --- Cache Aside ---
+# 数据从 DB 加载并写入缓存后的 TTL(秒)
+CACHE_ASIDE_TTL=3600
+# 缓存命中时是否刷新 TTL
 CACHE_HIT_REFRESH=false
 ```
 
 ### 运行示例
 
+先确保 MySQL 与 Redis 已启动(示例启动时会连接并 AutoMigrate 建表:db_example 建 `products` 表,另两个示例建 `users` 表),然后:
+
 ```bash
- go run "example\dataConsistency_db_cache_example\ddce_main.go"
+# 示例一:数据库读写(WriteRouterGroup + QueryRouterGroup,含内置/自定义查询方法)
+go run ./example/db_example
+
+# 示例二:缓存读写 + 自定义业务过滤器
+go run ./example/cache_example
+
+# 示例三:Cache-Aside 数据一致性 + 定时缓存落库
+go run ./example/dataConsistency_db_cache_example
 ```
 
-服务将在 `http://localhost:8080` 启动。
+服务默认监听 `http://localhost:8080`(`PORT` 可覆盖)。三个示例注册的路由:
+
+| 示例 | 说明 |
+|------|------|
+| [db_example](./example/db_example/db_exp_main.go) | 数据库侧完整演示:`WriteRouterGroup`(单条/批量写入、Upsert、原子增减、软删除)+ `QueryRouterGroup`(内置 `list` / `active_list` / `search` 与自定义 `cheap` 查询方法、按 ID 查询、计数);启动时自动播种示例数据 |
+| [cache_example](./example/cache_example/cache_exp_main.go) | 缓存侧完整四层分层演示;`WritedownRouterGroup` + `LookupRouterGroup`(含自定义 `activeUserFilter`) |
+| [dataConsistency_db_cache_example](./example/dataConsistency_db_cache_example/ddce_main.go) | 在 cache_example 基础上增加 10 秒定时任务:Redis `user:*` 批量 Upsert 回 MySQL;含优雅关闭 |
 
 ---
 
-## 示例代码解读
+## 核心组件
 
-- [示例代码](./example/dataConsistency_db_cache_example/ddce_main.go)
+### ServiceManager
 
-### 整体架构
+`service.NewServiceManager(model.User{})` 创建针对某个模型的业务管理器,自动推导表名、缓存 key 名。按类别的方法总览:
 
-示例代码采用**四层架构**设计：
+**DDL / 表管理**
 
-```
-┌─────────────────────────────────────┐
-│   1. 环境初始化层 (initEnv)          │  加载 .env 配置
-├─────────────────────────────────────┤
-│   2. 基础设施层 (initInfra)          │  初始化 DB、Redis 连接
-├─────────────────────────────────────┤
-│   3. 业务服务层 (initServices)       │  构建 ServiceManager
-├─────────────────────────────────────┤
-│   4. HTTP 路由层 (initRouter)        │  注册 API 端点
-└─────────────────────────────────────┘
-```
+| 方法 | 说明 |
+|------|------|
+| `Create` | AutoMigrate 建表,支持 `IfNotExists` / `DropIfExists` |
+| `CreateWithIndexes` | 建表并创建二级索引(支持唯一索引) |
+| `DropTable` / `HasTable` | 删表 / 判断表是否存在 |
 
-事先说明流程：
+**数据库单条写入(默认 REPEATABLE READ 事务)**
 
-**1. Cache Aside 读数据流程**
-```mermaid
-flowchart TD
-    A[客户端发起读用户请求] --> B{查Redis缓存}
-    B -- 有数据（缓存命中） --> C[直接返回数据给客户端]
-    B -- 无数据（缓存未命中） --> D[查MySQL数据库]
-    D -- 查到数据 --> E[把数据写入Redis缓存]
-    E --> F[返回数据给客户端]
-    D -- 没查到数据 --> G[返回空/错误给客户端]
-```
+| 方法 | 说明 |
+|------|------|
+| `SetSingle` | 单条插入或 Upsert,可选写入后失效缓存 |
+| `Update` / `UpdateByID` / `Save` | 更新指定行 / 按 ID 更新 / 整行保存 |
+| `Upsert` | 指定冲突列与更新列的 Upsert |
+| `Delete` / `DeleteByID` / `SoftDelete` / `SoftDeleteByID` | 硬删 / 软删(`deleted_at`) |
+| `Increment` / `Decrement`(及 `*ByID`) | 原子自增 / 自减 |
 
-**2. 缓存→数据库同步流程**
-```mermaid
-flowchart TD
-    A[触发同步（手动API/定时任务）] --> B[接收同步请求参数]
-    B --> C{从Redis按规则批量查数据}
-    C -- 无数据 --> D[返回“无数据”结果]
-    C -- 有数据 --> E[把数据整理成用户列表]
-    E --> F[批量写入MySQL（冲突时可选更新/跳过）]
-    F --> G{是否需要重新缓存？}
-    G -- 是 --> H[把数据重新写入Redis（带有效期）]
-    G -- 否 --> I[结束]
-    H --> I[返回同步结果（扫描数/同步数/耗时）]
-```
+**数据库批量写入**
 
-**3. 程序启动整体流程**
-```mermaid
-flowchart TD
-    A[启动main函数] --> B[加载.env配置]
-    B --> C[连接MySQL+Redis]
-    C --> D[创建用户服务对象]
-    D --> E[启动定时同步任务（后台）]
-    E --> F[注册API路由]
-    F --> G[启动HTTP服务，监听端口]
-```
-### 关键组件说明
+| 方法 | 说明 |
+|------|------|
+| `SetQuery` | 批量插入 / Upsert(分批提交,默认 100/批),可选模式化失效缓存 |
+| `BatchInsert` / `BatchUpsert` | 批量插入 / 批量 Upsert |
+| `BatchUpdate` / `BatchDelete` / `BatchSoftDelete` | 按条件批量更新 / 删除 / 软删 |
+| `BatchIncrement` / `BatchDecrement` | 批量原子增减(列名做注入校验) |
 
-#### 1. 环境初始化层
-```go
-func initEnv() {
-    _ = godotenv.Load()
-    // 加载 .env 文件中的环境变量
-}
-```
-**职责**：仅负责加载运行环境，不涉及任何业务逻辑。
+**数据库查询**
 
-#### 2. 基础设施层
-```go
-func initInfra() (*service.DBManager, *service.RedisManager) {
-    dbManager, _ := service.InitDB()
-    redisManager, _ := service.InitRedis()
-    return dbManager, redisManager
-}
-```
-**职责**：创建数据库和 Redis 连接管理器，确保资源正确释放。
+| 方法 | 说明 |
+|------|------|
+| `GetSingle` / `GetSingleByID` | 按条件 / 按 ID 查单条,支持 Preload、Select、ForUpdate |
+| `GetSingleOrCreate` | 查询不到则创建 |
+| `GetSingleWithLock` | `SELECT ... FOR UPDATE`,返回开放事务由调用方提交 |
+| `GetFirst` / `GetLast` | 按 `created_at` 最早 / 最新一条 |
+| `GetQuery` / `GetQueryWithoutTransaction` | 分页查询(总数、排序、分组、Having、Distinct、Preload) |
+| `CountQuery` / `ExistsQuery` | 计数 / 存在性判断 |
 
-#### 3. 业务服务层
-```go
-func initServices() *service.ServiceManager[model.User] {
-    userSvc := service.NewServiceManager(model.User{})
-    userSvc.Create(ctx, &service.CreateOptions{IfNotExists: true})
-    return userSvc
-}
-```
-**职责**：创建针对 `User` 模型的 ServiceManager，负责业务逻辑但不知道 HTTP 层细节。
+**缓存读(Lookup)**
 
-#### 4. HTTP 路由层
-```go
-func initRouter(userSvc *service.ServiceManager[model.User]) *gin.Engine {
-    r := gin.Default()
-    registerUserWriteRoutes(r, userSvc)   // 写入路由
-    registerUserLookupRoutes(r, userSvc)  // 查询路由
-    return r
-}
-```
-**职责**：将业务服务暴露为 RESTful API。
+| 方法 | 说明 |
+|------|------|
+| `LookupSingle` | 读单个 key 并反序列化,未命中返回 `redis.Nil` |
+| `LookupSingleWithFallback` | Cache-Aside 核心:命中返回,未命中查 DB 并异步回填 |
+| `LookupSingleByID` | 按 ID 自动构建 `模型:id` 形式 key 后查询 |
+| `LookupQuery` | MGET 批量查询,可选未命中回源 DB(从 key 解析 ID) |
+| `LookupQueryByPattern` | SCAN 遍历模式匹配的 key 后批量查询 |
+| `ExistsInCache` / `GetCacheTTL` / `ExtendCacheTTL` | 缓存存在性 / TTL 读取 / TTL 续期 |
+| `InvalidateCache` / `InvalidateCacheByPattern` | 精确 / 模式化失效(SCAN + DEL) |
+| `RefreshCache` | 批量从 DB 重查并回填缓存 |
 
-### 自定义业务过滤器示例
+**缓存写(Writedown)**
+
+| 方法 | 说明 |
+|------|------|
+| `WritedownSingle` | JSON 序列化后写入,支持 `Overwrite` / `NX` / `XX` |
+| `WritedownSingleAsync` | 异步写入(内置 4 worker 工作池,队列满时丢弃告警) |
+| `WritedownSingleWithLock` | 以 `lock:<key>` SetNX 分布式锁防缓存击穿 |
+| `WritedownSingleWithVersion` | WATCH/TxPipeline 乐观版本控制写入 |
+| `WritedownQuery` / `WritedownWithPipeline` | 批量 Pipeline 写入,一次网络往返 |
+| `WritedownIncremental` | 仅当数据变化时写入(比较函数判定) |
+| `WritedownQueryFromDB` / `WritedownAllToCache` / `WarmupCache` | 从 DB 加载回填 / 全量重建 / 预热 |
+| `ShutdownAsyncWorkers` | 优雅排空异步工作池 |
+
+### HTTPRouterManager 与路由组
+
+`http_router.NewHTTPRouterManager(svc)` 包装一个 ServiceManager;更常见的用法是直接使用四个路由组:
+
+| 路由组 | 目标存储 | 职责 |
+|--------|----------|------|
+| `WriteRouterGroup` | MySQL | 单条/批量数据库写入 |
+| `QueryRouterGroup` | MySQL | 方法化分页查询、按 ID 查询、计数 |
+| `WritedownRouterGroup` | Redis | 单条/批量缓存写入、锁、版本、预热 |
+| `LookupRouterGroup` | Redis(可回源 MySQL) | 模式查询、过滤器、Cache-Aside 单键查询、失效 |
+
+示例(摘自 [ddce_main.go](./example/dataConsistency_db_cache_example/ddce_main.go)):
 
 ```go
-func activeUserFilter(
-    ctx context.Context,
-    client *redis.Client,
-    keys []string,
-) ([]string, error) {
-    // 使用 Pipeline 批量获取 status 字段
-    pipe := client.Pipeline()
-    statusCmds := make(map[string]*redis.StringCmd, len(keys))
-    
-    for _, key := range keys {
-        statusCmds[key] = pipe.HGet(ctx, key, "status")
-    }
-    
-    pipe.Exec(ctx)
-    
-    // 筛选 status == "1" 的活跃用户
-    var activeKeys []string
-    for key, cmd := range statusCmds {
-        if status, _ := cmd.Result(); status == "1" {
-            activeKeys = append(activeKeys, key)
-        }
-    }
-    return activeKeys, nil
-}
+group := r.Group("/api/v1/users")
+
+// 缓存写入:POST /api/v1/users/cache/write 等
+http_router.NewWritedownRouterGroup(group, userSvc).RegisterRoutes("/cache")
+
+// 缓存查询:POST /api/v1/users/lookup/lookup、GET /api/v1/users/lookup/:key 等
+lookupRg := http_router.NewLookupRouterGroup(group, userSvc)
+lookupRg.SetDefaults("user:*", ttl)                 // 默认 key 模式与缓存时长
+lookupRg.SetCacheAsideConfig(ttl, refreshOnHit)     // Cache-Aside TTL 与命中续期
+lookupRg.SetCustomFilter(activeUserFilter)          // 可选:自定义业务过滤器
+lookupRg.RegisterRoutes("/lookup")
 ```
-
-### 数据库批落库 核心逻辑示例讲解
-
-```go
-// --- 核心同步逻辑 ---
-func syncCacheToDatabase(
-	ctx context.Context,
-	userSvc *service.ServiceManager[model.User],
-	req *CacheToDBRequest,
-) (*CacheToDBResult, error) {
-	startTime := time.Now()
-	if req.BatchSize <= 0 {
-		req.BatchSize = 500
-	}
-
-	// Step 1: 从 Redis 批量获取数据
-	userMap, err := userSvc.LookupQueryByPattern(ctx, req.KeyPattern, &service.LookupQueryOptions{
-		FallbackToDB: false,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("lookup failed: %w", err)
-	}
-
-	users := make([]model.User, 0, len(userMap))
-	for _, u := range userMap {
-		if u != nil {
-			users = append(users, *u)
-		}
-	}
-
-	if len(users) == 0 {
-		return &CacheToDBResult{
-			Duration: time.Since(startTime),
-			Mode:     "no_data",
-		}, nil
-	}
-
-	// Step 2: 批量写入数据库
-	err = userSvc.SetQuery(ctx, users, &service.SetQueryOptions{
-		BatchSize:        req.BatchSize,
-		OnConflictUpdate: req.ConflictStrategy != "skip",
-		InvalidateCache:  false,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("db write failed: %w", err)
-	}
-
-	result := &CacheToDBResult{
-		TotalScanned: len(userMap),
-		TotalSynced:  len(users),
-		Duration:     time.Since(startTime),
-		Mode:         "cache_aside",
-	}
-
-	// Step 3: Cache Aside 模式 - 落库后重新缓存
-	if req.RecacheAfterSync {
-		recached, err := recacheUsers(ctx, users, getCacheAsideTTL())
-		if err != nil {
-			log.Printf("Recache warning: %v", err)
-		} else {
-			result.RecachedItems = recached
-			log.Printf("Synced %d items, recached with TTL %v", len(users), getCacheAsideTTL())
-		}
-	} else {
-		log.Printf("Synced %d items to DB", len(users))
-	}
-
-	return result, nil
-}
-
-// recacheUsers 重新缓存用户数据
-func recacheUsers(ctx context.Context, users []model.User, ttl time.Duration) (int, error) {
-	rdb := service.GetRedis()
-	pipe := rdb.Pipeline()
-
-	for _, user := range users {
-		key := fmt.Sprintf("user:%d", user.ID)
-		jsonData, err := json.Marshal(user)
-		if err != nil {
-			log.Printf("Marshal error for user %d: %v", user.ID, err)
-			continue
-		}
-		pipe.Set(ctx, key, jsonData, ttl)
-	}
-
-	_, err := pipe.Exec(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("pipeline exec failed: %w", err)
-	}
-
-	return len(users), nil
-}
-
-// --- 配置辅助函数 ---
-
-func getCacheAsideTTL() time.Duration {
-	if ttlStr := os.Getenv("CACHE_ASIDE_TTL"); ttlStr != "" {
-		if ttl, err := strconv.Atoi(ttlStr); err == nil {
-			return time.Duration(ttl) * time.Second
-		}
-	}
-	return 1 * time.Hour
-}
-
-func getCacheHitRefresh() bool {
-	return os.Getenv("CACHE_HIT_REFRESH") == "true"
-}
-
-func getEnvOrDefault(key, defaultValue string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultValue
-}
-
-// --- 定时同步任务 ---
-
-func startPeriodicSync(ctx context.Context, userSvc *service.ServiceManager[model.User]) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			log.Println("🔄 Auto sync...")
-
-			result, err := syncCacheToDatabase(ctx, userSvc, &CacheToDBRequest{
-				KeyPattern:       "user:*",
-				ConflictStrategy: "upsert",
-				RecacheAfterSync: false, // 落库后不重新缓存，避免无限刷新 TTL
-			})
-
-			if err != nil {
-				log.Printf("❌ Sync failed: %v", err)
-			} else if result.TotalSynced > 0 {
-				log.Printf("Synced: %d items, took: %v (no recache)",
-					result.TotalSynced, result.Duration)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-```
-（需要补充）
-
-以及数据从缓存中读取自己支持cache-aside，下面是cache-aside的讲解：
-
-### cache-aside的讲解
-
-```go
-
-// ========== 核心查询逻辑 ==========
-
-func (lrg *LookupRouterGroup[T]) executeLookup(
-	ctx context.Context,
-	keyPattern string,
-	filters []filter_translator.FilterParam,
-	useCustomFilter bool,
-	fallbackToDB bool,
-) (map[string]*T, []string, error) {
-
-	// 1. 获取所有匹配的键
-	redisClient := service.GetRedis()
-	allKeys, err := redisClient.Keys(ctx, keyPattern).Result()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get keys: %w", err)
-	}
-
-	// 2. 应用自定义过滤（如果启用）
-	if useCustomFilter && lrg.customFilterFunc != nil {
-		allKeys, err = lrg.customFilterFunc(ctx, redisClient, allKeys)
-		if err != nil {
-			return nil, nil, fmt.Errorf("custom filter failed: %w", err)
-		}
-	}
-
-	// 3. 翻译并应用通用过滤器
-	if len(filters) > 0 {
-		redisFilters, err := lrg.TranslatorRegistry.TranslateBatch(filters)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid filters: %w", err)
-		}
-
-		allKeys, err = filter_translator.ApplyRedisFilters(ctx, redisClient, allKeys, redisFilters)
-		if err != nil {
-			return nil, nil, fmt.Errorf("filter application failed: %w", err)
-		}
-	}
-
-	// 只保留普通对象 key
-	filteredKeys := make([]string, 0, len(allKeys))
-	for _, k := range allKeys {
-		if !strings.HasSuffix(k, ":version") && !strings.HasSuffix(k, ":meta") {
-			filteredKeys = append(filteredKeys, k)
-		}
-	}
-	allKeys = filteredKeys
-
-	// 如果 Redis 没有数据
-	// 1. 有 filters 时，总是从 DB 查询（因为可能缓存中没有符合条件的数据）
-	// 2. 无 filters 且 fallback_db=true 时，从 DB 加载所有数据
-	if len(allKeys) == 0 {
-		if len(filters) > 0 || fallbackToDB {
-			return lrg.loadFromDBAndCache(ctx, keyPattern, filters)
-		}
-		return make(map[string]*T), []string{}, nil
-	}
-
-	// 4. 从缓存查询数据
-	opts := &service.LookupQueryOptions{
-		KeyPattern:   keyPattern,
-		CacheExpire:  lrg.defaultCacheExpire,
-		FallbackToDB: fallbackToDB,
-	}
-
-	result, err := lrg.Service.LookupQuery(ctx, allKeys, opts)
-	if err != nil {
-		return nil, nil, fmt.Errorf("lookup query failed: %w", err)
-	}
-
-	return result, allKeys, nil
-}
-
-// loadFromDBAndCache 从数据库加载数据并写入缓存（支持条件查询）
-func (lrg *LookupRouterGroup[T]) loadFromDBAndCache(
-	ctx context.Context,
-	keyPattern string,
-	filters []filter_translator.FilterParam,
-) (map[string]*T, []string, error) {
-	// 将 Redis filters 转换为 GORM 查询条件
-	var queryFunc func(*gorm.DB) *gorm.DB
-
-	if len(filters) > 0 {
-		gormFilters, err := filter_translator.DefaultGormRegistry.TranslateBatch(filters)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid gorm filters: %w", err)
-		}
-
-		queryFunc = func(db *gorm.DB) *gorm.DB {
-			return filter_translator.ApplyGormFilters(db, gormFilters)
-		}
-	}
-	// 从数据库查询数据
-	queryResult, err := lrg.Service.GetQueryWithoutTransaction(ctx, queryFunc, nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query from database: %w", err)
-	}
-
-	if len(queryResult.Data) == 0 {
-		return make(map[string]*T), []string{}, nil
-	}
-
-	// 批量写入缓存
-	rdb := service.GetRedis()
-	pipe := rdb.Pipeline()
-
-	resultMap := make(map[string]*T)
-	keys := make([]string, 0, len(queryResult.Data))
-
-	for i := range queryResult.Data {
-		item := &queryResult.Data[i]
-
-		// 序列化为 JSON
-		jsonData, err := json.Marshal(item)
-		if err != nil {
-			continue
-		}
-
-		// 从 JSON 中提取 ID（通用方法）
-		var tempMap map[string]interface{}
-		if err := json.Unmarshal(jsonData, &tempMap); err != nil {
-			continue
-		}
-
-		id, ok := tempMap["id"].(float64) // JSON 数字默认是 float64
-		if !ok {
-			continue
-		}
-
-		key := fmt.Sprintf("user:%d", uint(id))
-
-		// 写入 Pipeline
-		pipe.Set(ctx, key, jsonData, lrg.cacheAsideTTL)
-
-		resultMap[key] = item
-		keys = append(keys, key)
-	}
-
-	// 执行批量写入
-	if len(keys) > 0 {
-		if _, err := pipe.Exec(ctx); err != nil {
-			// 即使缓存失败，也返回数据库数据
-			return resultMap, keys, nil
-		}
-	}
-
-	return resultMap, keys, nil
-}
-
-// ========== Cache Aside 模式核心逻辑 ==========
-
-// extractIDFromKey 从 Redis key 中提取 ID (例如 "user:123" -> 123)
-func (lrg *LookupRouterGroup[T]) extractIDFromKey(key string) (uint, error) {
-	parts := strings.Split(key, ":")
-	if len(parts) < 2 {
-		return 0, fmt.Errorf("invalid key format: %s", key)
-	}
-	id, err := strconv.ParseUint(parts[len(parts)-1], 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse ID from key %s: %w", key, err)
-	}
-	return uint(id), nil
-}
-
-// getByKeyCacheAside 实现 Cache Aside 模式的单个键查询
-// 1. 先查 Redis
-// 2. 如果命中：根据配置决定是否刷新 TTL
-// 3. 如果未命中：从 DB 查询，转为 JSON，写入 Redis，设置 TTL
-func (lrg *LookupRouterGroup[T]) getByKeyCacheAside(ctx context.Context, key string) (*T, bool, error) {
-	redisClient := service.GetRedis()
-
-	// Step 1: 尝试从 Redis 获取
-	var result T
-	val, err := redisClient.Get(ctx, key).Result()
-
-	if err == nil {
-		// Cache Hit
-		if err := json.Unmarshal([]byte(val), &result); err != nil {
-			return nil, false, fmt.Errorf("failed to unmarshal cached data: %w", err)
-		}
-
-		// 根据配置决定是否刷新 TTL
-		if lrg.cacheHitRefresh {
-			redisClient.Expire(ctx, key, lrg.cacheAsideTTL)
-		}
-
-		return &result, true, nil
-	}
-
-	if err != redis.Nil {
-		// Redis 错误（非 key 不存在）
-		return nil, false, fmt.Errorf("redis get error: %w", err)
-	}
-
-	// Step 2: Cache Miss - 从数据库查询
-	id, err := lrg.extractIDFromKey(key)
-	if err != nil {
-		return nil, false, err
-	}
-
-	// 使用 ServiceManager 的 GetQueryWithoutTransaction 查询单条数据
-	queryResult, err := lrg.Service.GetQueryWithoutTransaction(
-		ctx,
-		func(db *gorm.DB) *gorm.DB {
-			return db.Where("id = ?", id)
-		},
-		nil,
-	)
-
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to query from database: %w", err)
-	}
-
-	if len(queryResult.Data) == 0 {
-		// 数据库中也不存在
-		return nil, false, fmt.Errorf("record not found for key: %s", key)
-	}
-
-	result = queryResult.Data[0]
-
-	// Step 3: 将数据转为 JSON 并写入 Redis
-	jsonData, err := json.Marshal(result)
-	if err != nil {
-		return &result, false, fmt.Errorf("failed to marshal data: %w", err)
-	}
-
-	// 写入 Redis 并设置 TTL
-	err = redisClient.Set(ctx, key, jsonData, lrg.cacheAsideTTL).Err()
-	if err != nil {
-		// 即使写入 Redis 失败，也返回数据库中的数据
-		return &result, false, fmt.Errorf("failed to cache data (returned DB data): %w", err)
-	}
-
-	return &result, false, nil
-}
-```
-（需要补充）
 
 ---
 
-## API 接口详解
+## HTTP API 参考
 
-### API 由来与设计理念
+### 统一响应格式
 
-框架通过 `WritedownRouterGroup` 和 `LookupRouterGroup` 两个组件自动生成标准化的 RESTful API,即只要使用了这两个方法，那么api都是在自定义的基础上固定关键部分：
+所有接口返回 `code`(0 成功,400 参数错误,500 服务错误)与 `message`,按接口类型附加数据字段:
 
-- **WritedownRouterGroup**：管理所有写入操作（创建、更新、删除、缓存写入）
-- **LookupRouterGroup**：管理所有查询操作（条件查询、缓存聚合查询）
-
-这种设计让开发者**无需手写路由处理函数**，只需配置 ServiceManager 即可获得完整的 CRUD API。
-
-### 前后端交互框架约束
-
-#### 统一响应格式
-
-所有 API 响应遵循以下结构：
-
-```json
-{
-    "code": 0,              // 0 表示成功，非 0 表示错误
-    "message": "success",   // 操作结果描述
-    "data": {},             // 具体数据（查询接口返回）
-    "keys": [],             // 返回的 key 列表（查询接口）
-    "count": 0,             // 数据条数（查询接口）
-    "items_written": 0      // 写入条数（写入接口）
-}
-```
-
-### 写入接口 (Write Operations)
-
-#### 1. 批量写入缓存
-**端点**：`POST /api/v1/users/cache/batch-write`
-
-**请求示例**：
-```json
-{
-    "key_template": "user:{id}",
-    "data": [
-        {"id": 1001, "username": "asdf", "email": "asdf@example.com"},
-        {"id": 1002, "username": "fdsa", "email": "fdaa@example.com"}
-    ],
-    "expiration": 1800,
-    "batch_size": 100
-}
-```
-
-**参数说明**：
-- `key_template`：Redis key 模板，`{id}` 会被替换为实际 ID
-- `data`：要写入的数据数组
-- `expiration`：过期时间（秒）
-- `batch_size`：批处理大小
-
-**响应示例**：
 ```json
 {
     "code": 0,
     "message": "success",
-    "items_written": 2
+    "data": {},
+    "keys": [],
+    "count": 0,
+    "items_written": 0,
+    "rows_affected": 0
 }
 ```
 
-#### 2. 版本化写入
-**端点**：`POST /api/v1/users/cache/write-version`
+### 数据库写入 — WriteRouterGroup
 
-**请求示例**：
+`RegisterRoutes(basePath)` 注册以下端点(basePath 如 `/api/v1/users`):
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `{base}/set` | 单条插入 / Upsert(`on_conflict_update`、`invalidate_cache`) |
+| POST | `{base}/insert` | 单条插入 |
+| PUT | `{base}/update` | 按 `id` 更新字段 |
+| DELETE | `{base}/delete` | 按 `id` 删除,`soft` 可选软删 |
+| POST | `{base}/upsert` | 指定冲突列 / 更新列的 Upsert |
+| POST | `{base}/increment` | 按 `id` 自增,`is_decr` 为自减 |
+| POST | `{base}/batch/set` | 批量插入 / Upsert(`batch_size`) |
+| POST | `{base}/batch/insert` | 批量插入 |
+| PUT | `{base}/batch/update` | 批量更新 |
+| DELETE | `{base}/batch/delete` | 按 `ids` 批量删除,`soft` 可选 |
+| POST | `{base}/batch/upsert` | 批量 Upsert |
+| POST | `{base}/batch/increment` | 批量自增 / 自减 |
+
+请求示例(`POST {base}/batch/set`):
+
+```json
+{
+    "data": [
+        {"id": 1001, "username": "asdf", "email": "asdf@example.com"},
+        {"id": 1002, "username": "fdsa", "email": "fdsa@example.com"}
+    ],
+    "batch_size": 100,
+    "on_conflict_update": true,
+    "invalidate_cache": false
+}
+```
+
+### 数据库查询 — QueryRouterGroup
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `{base}/query` | 方法化分页查询(见下方) |
+| GET | `{base}/:id` | 按 ID 查询单条,不存在返回 404 |
+| POST | `{base}/count` | 按 `filters` 计数 |
+
+`{base}/query` 采用"查询方法"机制:先通过 `RegisterMethod` / `RegisterCommonMethods` 注册命名方法(内置 `list`、`active_list`、`search`),请求时按名称调用:
+
+```json
+{
+    "method": "list",
+    "page": 1,
+    "filters": [
+        {"field": "age", "operator": ">=", "value": 21},
+        {"field": "age", "operator": "<", "value": 24}
+    ]
+}
+```
+
+响应:
+
+```json
+{
+    "code": 0,
+    "message": "success",
+    "data": [{"id": 1001, "username": "asdf", "age": 21}],
+    "total": 1,
+    "page": 1,
+    "page_size": 20,
+    "total_pages": 1
+}
+```
+
+### 缓存写入 — WritedownRouterGroup
+
+示例中 `RegisterRoutes("/cache")` 挂在 `/api/v1/users` 下,得到:
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `{base}/write` | 单条写入;`async: true` 走异步工作池 |
+| POST | `{base}/write-lock` | 分布式锁保护下从 DB 加载并写入 |
+| POST | `{base}/write-version` | 乐观版本号写入(版本不匹配则失败) |
+| POST | `{base}/refresh` | 按 key / id 从 DB 刷新单个缓存 |
+| POST | `{base}/batch-write` | 批量写入:`data` 直接给数据、`ids` 按 ID 从 DB 加载、`load_all` 全量 |
+| POST | `{base}/warmup` | 缓存预热(按模板、数量、排序加载) |
+
+TTL 优先级:请求中的 `expiration_seconds` > 环境变量 `CACHE_ASIDE_TTL` > 内置默认 3600 秒。
+
+请求示例(`POST /api/v1/users/cache/batch-write`):
+
+```json
+{
+    "key_template": "user:{id}",
+    "data": [
+        {"id": 1001, "username": "asdf", "email": "asdf@example.com"}
+    ],
+    "expiration_seconds": 1800,
+    "batch_size": 100,
+    "overwrite": true,
+    "use_pipeline": true,
+    "incremental": false
+}
+```
+
+响应:
+
+```json
+{
+    "code": 0,
+    "message": "success",
+    "items_written": 1
+}
+```
+
+版本化写入示例(`POST /api/v1/users/cache/write-version`):
+
 ```json
 {
     "key": "user:1006",
-    "data": {
-        "id": 1003,
-        "username": "sukasuka",
-        "email": "sukasuka@example.com",
-        "age": 18
-    },
+    "data": {"id": 1006, "username": "sukasuka", "email": "sukasuka@example.com", "age": 18},
     "version": 5,
-    "expiration": 3600
+    "expiration_seconds": 3600
 }
 ```
 
-**特性**：支持乐观锁，只有版本号匹配时才写入成功。
+### 缓存查询 — LookupRouterGroup
 
-#### 3. 普通写入
-**端点**：`POST /api/v1/users/cache/write`
+示例中 `RegisterRoutes("/lookup")` 挂在 `/api/v1/users` 下,得到:
 
-**请求示例**：
-```json
-{
-    "key": "user:1007",
-    "data": {
-        "id": 1001,
-        "username": "seven",
-        "email": "seven@example.com",
-        "age": 25
-    },
-    "expiration": 3600,
-    "overwrite": true
-}
-```
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `{base}/lookup` | 按 `key_pattern` SCAN + MGET 批量查询,支持过滤器、自定义过滤器、回源 |
+| GET | `{base}/:key` | 单键 Cache-Aside 查询(见 [Cache Aside 模式](#cache-aside-模式)) |
+| POST | `{base}/count` | 统计匹配过滤条件的缓存键数量 |
+| POST | `{base}/invalidate` | 按 `keys` 列表或 `pattern` 失效缓存 |
 
-**参数说明**：
-- `overwrite`：是否覆盖已存在的 key
+`POST {base}/lookup` 请求示例:
 
-### 查询接口 (Lookup Operations)
-
-#### 基础查询
-**端点**：`POST /api/v1/users/lookup/lookup`
-
-**请求示例 1：查询所有用户**
 ```json
 {
     "key_pattern": "user:*",
-    "filters": [],
+    "filters": [
+        {"field": "age", "operator": "between", "value": [21, 23]}
+    ],
     "use_custom_filter": false,
     "fallback_db": false
 }
 ```
 
-**响应示例**：
+响应:
+
 ```json
 {
     "code": 0,
     "message": "success",
     "data": {
-        "user:1001": {
-            "id": 1001,
-            "username": "asdf",
-            "email": "asdf@example.com",
-            "age": 21
-        },
-        "user:1002": {
-            "id": 1002,
-            "username": "fdsa",
-            "email": "fdaa@example.com",
-            "age": 22
-        }
+        "user:1001": {"id": 1001, "username": "asdf", "email": "asdf@example.com", "age": 21},
+        "user:1002": {"id": 1002, "username": "fdsa", "email": "fdsa@example.com", "age": 22}
     },
     "keys": ["user:1001", "user:1002"],
     "count": 2
 }
 ```
 
-**请求示例 2：带条件过滤**
-```json
-{
-    "key_pattern": "user:*",
-    "filters": [
-        {"field": "age", "operator": "<", "value": 24},
-        {"field": "age", "operator": ">=", "value": 21}
-    ],
-    "use_custom_filter": false,
-    "fallback_db": false
-}
-```
-或者
-```json
-{
-  "key_pattern": "user:*",
-  "filters": [
-    {
-      "field": "age",
-      "operator": "between",
-      "value": [21, 23]
-    }
-  ],
-  "use_custom_filter": false,
-  "fallback_db": false
-}
-```
-**响应示例**：
-```json
-{
-    "code": 0,
-    "message": "success",
-    "data": {
-        "user:1001": {
-            "id": 1001,
-            "username": "asdf",
-            "email": "asdf@example.com",
-            "age": 21,
-            "created_at": "0001-01-01T00:00:00Z",
-            "updated_at": "0001-01-01T00:00:00Z"
-        },
-        "user:1002": {
-            "id": 1002,
-            "username": "fdsa",
-            "email": "fdaa@example.com",
-            "age": 22,
-            "created_at": "0001-01-01T00:00:00Z",
-            "updated_at": "0001-01-01T00:00:00Z"
-        },
-        "user:1003": {
-            "id": 1003,
-            "username": "asdff",
-            "email": "asdff@example.com",
-            "age": 23,
-            "created_at": "0001-01-01T00:00:00Z",
-            "updated_at": "0001-01-01T00:00:00Z"
-        }
-    },
-    "keys": [
-        "user:1001",
-        "user:1002",
-        "user:1003"
-    ],
-    "count": 3
-}
-```
+参数说明:
 
-**参数说明**：
-- `key_pattern`：Redis key 匹配模式（支持 `*` 通配符）
-- `filters`：过滤条件数组（多个条件为 AND 关系）
-- `use_custom_filter`：是否使用自定义业务过滤器（如 `activeUserFilter`）
-- `fallback_db`：缓存未命中时是否回源数据库
+- `key_pattern`:Redis key 匹配模式,内部使用 SCAN 游标遍历
+- `filters`:过滤条件数组,多条件为 AND 关系,支持全部 11 种操作符
+- `use_custom_filter`:启用通过 `SetCustomFilter` 注入的自定义业务过滤器
+- `fallback_db`:缓存无数据时是否回源数据库(携带 `filters` 时始终允许回源)
 
 ---
 
 ## 过滤器系统
 
-### 过滤器架构
+### 翻译流水线
 
-框架提供了统一的过滤器翻译机制，将前端传入的过滤条件自动转换为 Redis 或数据库查询：
+前端传入统一格式的 JSON 过滤条件,由翻译器注册表分别转换为 GORM 查询或 Redis 内存过滤:
 
 ```
-前端 JSON 过滤条件  →  FilterParam  →  FilterTranslator  →  RedisFilter  →  执行过滤
+前端 JSON(filters) → FilterParam → FilterTranslator → GormFilter / RedisFilter → 执行过滤
 ```
 
-### 支持的过滤操作符对照表
+两个后端共享同一套操作符与语义,切换数据源无需改写过滤条件。
 
-| 操作符 | 含义 | 示例 | 说明 |
-|--------|------|------|------|
-| `=` | 等于 | `{"field": "age", "operator": "=", "value": 25}` | 精确匹配 |
-| `!=` | 不等于 | `{"field": "status", "operator": "!=", "value": "inactive"}` | 排除指定值 |
-| `>` | 大于 | `{"field": "age", "operator": ">", "value": 18}` | 数值比较 |
-| `>=` | 大于等于 | `{"field": "score", "operator": ">=", "value": 60}` | 数值比较（含边界） |
-| `<` | 小于 | `{"field": "age", "operator": "<", "value": 30}` | 数值比较 |
-| `<=` | 小于等于 | `{"field": "price", "operator": "<=", "value": 100}` | 数值比较（含边界） |
-| `like` | 模糊匹配 | `{"field": "username", "operator": "like", "value": "john"}` | 字符串包含（不区分大小写） |
-| `in` | 在集合中 | `{"field": "id", "operator": "in", "value": [1, 2, 3]}` | 匹配多个值之一 |
-| `between` | 区间范围 | `{"field": "age", "operator": "between", "value": [18, 30]}` | 闭区间 [min, max] |
-| `isnull` | 为空 | `{"field": "deleted_at", "operator": "isnull"}` | 字段值为 null |
-| `isnotnull` | 不为空 | `{"field": "email", "operator": "isnotnull"}` | 字段值非 null |
+### 支持的操作符
 
-### 过滤器实现原理
+| 操作符 | 含义 | 示例 |
+|--------|------|------|
+| `=` | 等于 | `{"field": "age", "operator": "=", "value": 25}` |
+| `!=` | 不等于 | `{"field": "status", "operator": "!=", "value": "inactive"}` |
+| `>` / `>=` | 大于 / 大于等于 | `{"field": "age", "operator": ">=", "value": 18}` |
+| `<` / `<=` | 小于 / 小于等于 | `{"field": "price", "operator": "<=", "value": 100}` |
+| `like` | 模糊匹配(不区分大小写) | `{"field": "username", "operator": "like", "value": "john"}` |
+| `in` | 在集合中 | `{"field": "id", "operator": "in", "value": [1, 2, 3]}` |
+| `between` | 闭区间范围 | `{"field": "age", "operator": "between", "value": [18, 30]}` |
+| `isnull` | 为空 | `{"field": "deleted_at", "operator": "isnull"}` |
+| `isnotnull` | 不为空 | `{"field": "email", "operator": "isnotnull"}` |
 
-#### 批量优化策略
+### 实现原理
 
-框架使用 **MGET + JSON 解析** 的方式实现高性能批量过滤：
+- **GORM 侧**:翻译为参数化 WHERE 子句(`field = ?`、`field LIKE ?`、`field IN ?`、`field BETWEEN ? AND ?`),字段名经 `ValidateSQLIdentifier` 正则校验,杜绝 SQL 注入。
+- **Redis 侧**:使用 **MGET 一次性取回全部候选值**后内存解析 JSON 过滤,避免逐 key 网络往返与 Lua 脚本复杂性;字段提取优先顶层,其次尝试 `data` 嵌套字段。
+
+### 自定义业务过滤器
+
+当通用操作符不足以表达业务规则时,通过 `SetCustomFilter` 注入(完整示例见 [cache_example](./example/cache_example/cache_exp_main.go))。
+
+缓存中的数据由 `WritedownSingle` 以 `SET`(JSON 字符串)写入,因此自定义过滤器通常的做法是 Pipeline 批量 `GET` 后在内存中反序列化筛选:
 
 ```go
-func applyRedisBatchFilter(...) ([]string, error) {
-    // 1. 一次性获取所有 key 的值（避免 N 次网络请求）
-    values, _ := client.MGet(ctx, keys...).Result()
-    
-    // 2. 在内存中解析 JSON 并应用过滤逻辑
-    for i, val := range values {
-        var data map[string]interface{}
-        json.Unmarshal([]byte(val.(string)), &data)
-        
-        // 提取字段值并应用过滤函数
-        if filterFunc(data[field]) {
-            result = append(result, keys[i])
+// 筛选 status == "active" 的活跃用户:Pipeline 批量 GET 后在内存中筛选
+func activeUserFilter(
+    ctx context.Context,
+    client *redis.Client,
+    keys []string,
+) ([]string, error) {
+    pipe := client.Pipeline()
+    getCmds := make(map[string]*redis.StringCmd, len(keys))
+    for _, key := range keys {
+        getCmds[key] = pipe.Get(ctx, key)
+    }
+    if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+        return nil, err
+    }
+
+    var activeKeys []string
+    for key, cmd := range getCmds {
+        raw, err := cmd.Bytes()
+        if err != nil {
+            continue // key 不存在或已过期
+        }
+        var user model.User
+        if err := json.Unmarshal(raw, &user); err == nil && user.Status == "active" {
+            activeKeys = append(activeKeys, key)
         }
     }
-    return result, nil
+    return activeKeys, nil
 }
+
+lookupRg.SetCustomFilter(activeUserFilter)
 ```
 
-**性能优势**：
-- 使用 MGET 替代多次 GET，减少网络往返
-- 内存过滤避免 Redis Lua 脚本复杂性
-- 支持复杂 JSON 结构的字段提取
-
-#### 数据结构嵌套支持
-
-过滤器支持两层 JSON 结构：
-
-```json
-// 顶层字段
-{"id": 1001, "age": 25}
-
-// 嵌套在 data 字段中
-{"data": {"id": 1001, "age": 25}}
-```
-
-提取逻辑会优先查找顶层，若无则尝试 `data` 嵌套字段。
-
-### 多条件组合示例
-
-```json
-{
-  "key_pattern": "user:*",
-  "filters": [
-    {
-      "field": "age",
-      "operator": "<",
-      "value": 24
-    },
-    {
-      "field": "age",
-      "operator": ">",
-      "value": 21
-    }
-  ],
-  "use_custom_filter": false,
-  "fallback_db": false
-}
-```
-
-**执行逻辑**：
-1. 使用 `key_pattern` 匹配所有符合的 key
-2. 依次应用每个过滤器（AND 关系）
-3. 返回最终符合所有条件的 key 和数据
+请求时传 `"use_custom_filter": true` 启用。
 
 ---
 
-## 未来示例讲解预告，功能上实现但是需要写示例代码
+## Cache Aside 模式
 
-### 1. 缓存批量落库（Cache Write-Through）
+`GET /api/v1/users/lookup/:key` 实现标准的 Cache Aside 单键查询:
 
-**功能描述**：将 Redis 缓存中的数据批量同步到数据库，支持增量和全量同步。
+1. **缓存命中**:直接返回数据,`cache_hit: true`、`source: "cache"`;若 `CACHE_HIT_REFRESH=true` 则顺带续期 TTL。
+2. **缓存未命中**:从 key 尾部解析 ID → 查 MySQL → JSON 序列化写回 Redis(带 TTL)→ 返回 `source: "database"`。缓存写失败不影响返回 DB 数据。
+3. **DB 也无数据**:返回 404。
 
-**预期 API**：
 ```json
-POST /api/v1/users/sync/cache-to-db
 {
-    "key_pattern": "user:*",
-    "batch_size": 500,
-    "conflict_strategy": "upsert"  // upsert | skip | overwrite
+    "code": 0,
+    "message": "success",
+    "data": {"id": 1001, "username": "asdf", "age": 21},
+    "cache_hit": false,
+    "source": "database"
 }
 ```
 
-**实现要点**：
-- 使用 Redis SCAN 游标遍历避免阻塞
-- 批量 INSERT/UPDATE 优化数据库性能
-- 支持冲突解决策略（覆盖、跳过、更新）
+批量查询 `POST {base}/lookup` 在 Redis 无数据且(携带 `filters` 或 `fallback_db=true`)时同样回源 DB,并将结果通过 Pipeline 回填缓存。相关行为可通过环境变量调节:
 
-### 2. 数据库回滚到缓存（DB Read-Through）
-
-**功能描述**：从数据库加载数据并重建 Redis 缓存，支持全量和增量预热。
-
-**预期 API**：
-```json
-POST /api/v1/users/sync/db-to-cache
-{
-    "filters": [
-        {"field": "created_at", "operator": ">", "value": "2024-01-01"}
-    ],
-    "key_template": "user:{id}",
-    "expiration": 3600,
-    "batch_size": 1000
-}
-```
-
-**实现要点**：
-- 分批从数据库读取数据（避免 OOM）
-- 使用 Redis Pipeline 批量写入
-- 支持进度跟踪和断点续传
-
-### 3. 缓存一致性保障
-
-**功能描述**：监听数据库变更事件（如 Binlog），自动更新 Redis 缓存。
-
-**技术方案**：
-- 集成 Debezium 或 Canal 监听 MySQL Binlog
-- 实时推送变更到 Redis
-- 支持延迟删除和版本号校验
+| 环境变量 | 作用 |
+|----------|------|
+| `CACHE_ASIDE_TTL` | 回源数据写入缓存时的 TTL(秒),默认 3600 |
+| `CACHE_HIT_REFRESH` | `true` 时每次命中续期 TTL(热数据常驻),默认 `false` |
 
 ---
 
-## 总结
+## 配置项一览
 
-AbstractManager 框架通过分层架构和统一抽象，大幅简化了缓存管理的复杂度。开发者只需：
+框架与示例读取的全部环境变量(建议放入 `.env`,由 [godotenv](https://github.com/joho/godotenv) 加载):
 
-1. 定义数据模型（如 `User`）
-2. 创建 `ServiceManager`
-3. 注册路由组
+| 变量 | 必填 | 默认值 | 说明 |
+|------|:----:|--------|------|
+| `DB_HOST` / `DB_PORT` | ✓ | — | MySQL 地址与端口 |
+| `DB_USER` / `DB_PASSWORD` | ✓ | — | MySQL 账号 |
+| `DB_NAME` | ✓ | — | MySQL 库名 |
+| `REDIS_HOST` / `REDIS_PORT` | ✓ | — | Redis 地址与端口 |
+| `REDIS_PASSWORD` | — | 空 | Redis 密码,无密码可留空 |
+| `CACHE_ASIDE_TTL` | — | `3600` | Cache-Aside 回填缓存的 TTL(秒) |
+| `CACHE_HIT_REFRESH` | — | `false` | 缓存命中时是否续期 TTL |
+| `DB_TIMEOUT_SECONDS` | — | `30` | 数据库操作默认超时 |
+| `REDIS_TIMEOUT_SECONDS` | — | `10` | Redis 操作默认超时 |
+| `DDL_TIMEOUT_SECONDS` | — | `60` | 建表等 DDL 操作默认超时 |
+| `PORT` | — | `8080` | 示例服务监听端口 |
 
-即可获得完整的缓存 CRUD API 和强大的过滤查询能力，以及根据cache-aside的示例可以给出绝大部分的原型后端实现。框架的过滤器系统通过高性能批量操作和灵活的操作符支持，满足了复杂业务场景的需求。
+> 框架内部通过 `util.EnsureTimeout` 应用超时:仅在 context 尚无 deadline 时补充,不会覆盖调用方已设置的超时。
 
-未来版本将增强缓存与数据库的双向同步能力，进一步提升数据一致性和系统可靠性。
+---
 
-## 情况说明
+## 测试
 
-主包现要去昆明老妈家那边过春节，所以很多时候不能及时更新。春节之后会正常更新该框架的示例代码以及根据示例代码改进框架代码。
+测试不依赖外部服务:集成与并发测试使用进程内的 [miniredis](https://github.com/alicebob/miniredis),数据库层测试使用 [go-sqlmock](https://github.com/DATA-DOG/go-sqlmock)。
+
+```bash
+# 全部测试(单元 + 集成 + 并发)
+go test ./...
+
+# 仅单元测试
+go test -v ./tests/unit/...
+
+# 仅集成测试
+go test -v ./tests/integration/...
+
+# 竞态检测(CI 必跑;Windows 下需启用 CGO 并安装 GCC)
+go test -race -count=1 ./tests/race_perf/...
+
+# 基准测试
+go test -bench=. -benchmem ./tests/race_perf/
+```
+
+CI(GitHub Actions,Go 1.24 / 1.25 矩阵)会在每次 push / PR 时执行构建、单元、集成与竞态测试,见 [go.yml](./.github/workflows/go.yml)。性能基准结果分析见 [docs/performance_heatmap.md](./docs/performance_heatmap.md)。
+
+---
+
+## 项目结构
+
+```
+AbstractManager/
+├── service/                # ServiceManager:泛型数据库 + 缓存业务层
+│   ├── sql_pool.go         #   DBManager / InitDB(连接池)
+│   ├── cache_pool.go       #   RedisManager / InitRedis / ScanKeys
+│   ├── create.go           #   DDL:建表、索引
+│   ├── set_single.go       #   单条写:插入、更新、删除、增减
+│   ├── set_query.go        #   批量写:批量插入、Upsert、更新、删除
+│   ├── get_single.go       #   单条读:按 ID、加锁、GetOrCreate
+│   ├── get_query.go        #   查询:分页、排序、分组、计数
+│   ├── lookup_single.go    #   缓存读:单键 + Cache-Aside 回源
+│   ├── lookup_query.go     #   缓存读:MGET 批量、模式查询
+│   ├── writedown_single.go #   缓存写:单键、异步、锁、版本
+│   └── writedown_query.go  #   缓存写:Pipeline 批量、增量、预热
+├── http_router/            # 四个自动化路由组(gin)
+│   ├── set_router_group.go     #   WriteRouterGroup → DB 写端点
+│   ├── get_router_group.go     #   QueryRouterGroup → DB 查询端点
+│   ├── cache_set_router_group.go   #   WritedownRouterGroup → 缓存写端点
+│   └── cache_get_router_group.go   #   LookupRouterGroup → 缓存读端点
+├── util/
+│   ├── filter_translator/  # 过滤器翻译:FilterParam → GORM / Redis
+│   ├── cache_key_builder/  # 缓存 key 构建器(模板 / 前缀 / 函数)
+│   ├── context.go          # 超时控制(EnsureTimeout)
+│   └── env.go              # 环境变量读取(Cache-Aside TTL 等)
+├── example/
+│   ├── db_example/                       # 数据库读写示例(Write + Query 路由组)
+│   ├── cache_example/                    # 缓存读写 + 自定义过滤器示例
+│   └── dataConsistency_db_cache_example/ # Cache-Aside + 定时落库示例
+├── tests/
+│   ├── unit/         # 单元测试(无外部依赖)
+│   ├── integration/  # 集成测试(miniredis 全链路)
+│   ├── race_perf/    # 并发竞态 + 基准测试
+│   └── testutil/     # 共享测试夹具
+└── docs/             # 审计报告、性能分析、测试计划
+```
+
+---
+
+## 路线图
+
+**已实现**
+
+- 缓存批量落库:`SetQuery` / `BatchUpsert` + 示例定时同步任务
+- DB 回源重建缓存:`WritedownQueryFromDB` / `WritedownAllToCache` / `WarmupCache` / `batch-write` 的 `ids`、`load_all`
+- 缓存一致性工具:乐观版本写入、分布式锁、异步回填工作池、模式化失效
+
+**计划中**
+
+- 基于变更事件(MySQL Binlog,Debezium / Canal)的缓存自动更新
+- 更多数据库驱动支持(PostgreSQL / SQLite)
+- 将示例中的 cache-to-db 同步流程整理为标准 `SyncRouterGroup` 路由组
+
+---
+
+## 相关文档
+
+- [docs/ISSUES_AUDIT.md](./docs/ISSUES_AUDIT.md) — 代码审计问题清单
+- [docs/performance_heatmap.md](./docs/performance_heatmap.md) — 性能热点分析
+- [docs/test_plan/](./docs/test_plan/) — 测试计划与用例设计
+- [.env.example](./.env.example) — 环境变量模板
+
+## 许可证
+
+[MIT](./LICENSE) © 2026 Super-Gagaga
