@@ -35,3 +35,13 @@ func GetEnvOrDefault(key, defaultValue string) string {
 	}
 	return defaultValue
 }
+
+// GetEnvIntOrDefault 读取整型环境变量，缺失或非法时返回默认值
+func GetEnvIntOrDefault(key string, defaultValue int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return defaultValue
+}

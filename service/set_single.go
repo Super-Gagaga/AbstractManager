@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Super-Gagaga/abstract-manager/util"
+	"github.com/Super-Gagaga/abstract-manager/util/logger"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -54,7 +55,8 @@ func (sm *ServiceManager[T]) SetSingle(
 	// 使缓存失效
 	if opts.InvalidateCache {
 		if err := sm.invalidateCacheForSingle(ctx, data); err != nil {
-			fmt.Printf("warning: failed to invalidate cache: %v\n", err)
+			logger.FromContext(ctx).Warn("cache.invalidate_failed",
+				"table", sm.TableName, "err", err)
 		}
 	}
 

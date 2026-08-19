@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Super-Gagaga/abstract-manager/util"
+	"github.com/Super-Gagaga/abstract-manager/util/logger"
 
 	"gorm.io/gorm"
 )
@@ -166,7 +167,7 @@ func (sm *ServiceManager[T]) LookupQueryWithRefresh(
 			// 写入缓存
 			if err := redis.Set(ctx, key, item, expiration); err != nil {
 				// 记录错误但不中断流程
-				fmt.Printf("warning: failed to cache item with key %s: %v\n", key, err)
+				logger.FromContext(ctx).Warn("cache.backfill_failed", "key", key, "err", err)
 			}
 
 			result[key] = item
@@ -255,7 +256,7 @@ func (sm *ServiceManager[T]) lookupFromDB(
 		}
 
 		if err := redis.Set(ctx, key, item, expiration); err != nil {
-			fmt.Printf("warning: failed to cache item: %v\n", err)
+			logger.FromContext(ctx).Warn("cache.backfill_failed", "key", key, "err", err)
 		}
 
 		resultMap[key] = item

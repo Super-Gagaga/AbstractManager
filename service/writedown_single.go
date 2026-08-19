@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Super-Gagaga/abstract-manager/util"
+	"github.com/Super-Gagaga/abstract-manager/util/logger"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -212,7 +213,7 @@ func (sm *ServiceManager[T]) executeAsyncTask(task asyncCacheTask[T]) {
 		defer cancel()
 	}
 	if err := sm.WritedownSingle(ctx, task.key, task.data, &WritedownSingleOptions{Expiration: task.expiration}); err != nil {
-		fmt.Printf("[AsyncCache] Failed for key %s: %v\n", task.key, err)
+		logger.FromContext(ctx).Error("async_cache.write_failed", "key", task.key, "err", err)
 	}
 }
 
@@ -237,8 +238,9 @@ func (sm *ServiceManager[T]) WritedownSingleAsync(
 	case sm.asyncTasks <- task:
 		// 投递成功
 	default:
-		// 队列满，丢弃任务（异步写入语义允许丢）
-		fmt.Printf("[AsyncCache] WARNING: task queue full, dropped write for key %s\n", key)
+		// 队列满，丢弃任务（异步写入语义允许丢，但必须可观测）
+		logger.FromContext(ctx).Error("async_cache.queue_dropped",
+			"key", key, "queue_size", cap(sm.asyncTasks))
 	}
 }
 

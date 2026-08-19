@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/Super-Gagaga/abstract-manager/service"
 	"github.com/Super-Gagaga/abstract-manager/util"
 	"github.com/Super-Gagaga/abstract-manager/util/filter_translator"
+	"github.com/Super-Gagaga/abstract-manager/util/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -339,7 +339,7 @@ func (lrg *LookupRouterGroup[T]) getByKeyCacheAside(ctx context.Context, key str
 		if lrg.cacheHitRefresh {
 			if err := redisClient.Expire(ctx, key, lrg.cacheAsideTTL).Err(); err != nil {
 				// TTL 刷新失败不影响返回数据
-				fmt.Fprintf(os.Stderr, "WARNING: failed to refresh TTL for key %s: %v\n", key, err)
+				logger.FromContext(ctx).Warn("cache.ttl_refresh_failed", "key", key, "err", err)
 			}
 		}
 

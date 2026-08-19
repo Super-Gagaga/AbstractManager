@@ -6,9 +6,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/Super-Gagaga/abstract-manager/util"
+
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // DBManager 数据库管理器
@@ -29,7 +30,10 @@ func InitDB() (*DBManager, error) {
 	)
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		// SQL 日志桥接到 slog(LOG_LEVEL 控制,DB_SLOW_QUERY_MS 控制慢查询阈值)
+		Logger: NewSlogGormLogger(
+			time.Duration(util.GetEnvIntOrDefault("DB_SLOW_QUERY_MS", 500)) * time.Millisecond,
+		),
 		// 准备语句执行，提高性能
 		PrepareStmt: true,
 		// 命名策略
