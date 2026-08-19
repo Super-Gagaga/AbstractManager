@@ -53,17 +53,30 @@ func (sm *ServiceManager[T]) WritedownSingle(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 
-	var cmdErr error
 	if opts.NX {
-		cmdErr = rdb.SetNX(ctx, key, valueBytes, opts.Expiration).Err()
-	} else if opts.XX {
-		cmdErr = rdb.SetXX(ctx, key, valueBytes, opts.Expiration).Err()
-	} else {
-		cmdErr = rdb.Set(ctx, key, valueBytes, opts.Expiration).Err()
+		ok, err := rdb.SetNX(ctx, key, valueBytes, opts.Expiration).Result()
+		if err != nil {
+			return fmt.Errorf("failed to write cache for key %s: %w", key, err)
+		}
+		if !ok {
+			return fmt.Errorf("NX conflict: key %s already exists", key)
+		}
+		return nil
 	}
 
-	if cmdErr != nil {
-		return fmt.Errorf("failed to write cache for key %s: %w", key, cmdErr)
+	if opts.XX {
+		ok, err := rdb.SetXX(ctx, key, valueBytes, opts.Expiration).Result()
+		if err != nil {
+			return fmt.Errorf("failed to write cache for key %s: %w", key, err)
+		}
+		if !ok {
+			return fmt.Errorf("XX conflict: key %s does not exist", key)
+		}
+		return nil
+	}
+
+	if err := rdb.Set(ctx, key, valueBytes, opts.Expiration).Err(); err != nil {
+		return fmt.Errorf("failed to write cache for key %s: %w", key, err)
 	}
 	return nil
 }

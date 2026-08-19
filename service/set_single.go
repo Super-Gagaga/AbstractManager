@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Super-Gagaga/abstract-manager/util"
+	"github.com/Super-Gagaga/abstract-manager/util/filter_translator"
 	"github.com/Super-Gagaga/abstract-manager/util/logger"
 
 	"gorm.io/gorm"
@@ -144,6 +145,11 @@ func (sm *ServiceManager[T]) Increment(
 	value interface{},
 	queryFunc func(*gorm.DB) *gorm.DB,
 ) error {
+	// 校验列名，防止 SQL 注入
+	if err := filter_translator.ValidateSQLIdentifier(column); err != nil {
+		return fmt.Errorf("invalid column name %q: %w", column, err)
+	}
+
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -164,6 +170,11 @@ func (sm *ServiceManager[T]) Decrement(
 	value interface{},
 	queryFunc func(*gorm.DB) *gorm.DB,
 ) error {
+	// 校验列名，防止 SQL 注入
+	if err := filter_translator.ValidateSQLIdentifier(column); err != nil {
+		return fmt.Errorf("invalid column name %q: %w", column, err)
+	}
+
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {

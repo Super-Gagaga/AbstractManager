@@ -255,13 +255,13 @@ func TestIntegration_WritedownSingle_NX(t *testing.T) {
 		t.Fatalf("first NX write failed: %v", err)
 	}
 
-	// Second write with NX should be silently ignored (key already exists)
+	// Second write with NX must fail (key already exists) and keep the original value
 	err = sm.WritedownSingle(ctx, key, &user2, &service.WritedownSingleOptions{
 		Expiration: 1 * time.Hour,
 		NX:         true,
 	})
-	if err != nil {
-		t.Fatalf("second NX write should not error: %v", err)
+	if err == nil {
+		t.Fatal("second NX write should return NX conflict error")
 	}
 
 	// Read back — should still be user1
