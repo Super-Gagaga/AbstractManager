@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"AbstractManager/util"
+	"github.com/Super-Gagaga/AbstractManager/util"
 
 	"github.com/stretchr/testify/assert"
 )

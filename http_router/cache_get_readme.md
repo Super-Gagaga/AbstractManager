@@ -36,8 +36,8 @@ import (
     "context"
     "time"
     
-    "AbstractManager/http_router"
-    "AbstractManager/service"
+    "github.com/Super-Gagaga/AbstractManager/http_router"
+    "github.com/Super-Gagaga/AbstractManager/service"
     
     "github.com/gin-gonic/gin"
 )

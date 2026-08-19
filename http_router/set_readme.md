@@ -34,8 +34,8 @@ package main
 import (
     "github.com/gin-gonic/gin"
     
-    "AbstractManager/http_router"
-    "AbstractManager/service"
+    "github.com/Super-Gagaga/AbstractManager/http_router"
+    "github.com/Super-Gagaga/AbstractManager/service"
 )
 
 // 数据模型

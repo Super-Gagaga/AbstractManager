@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"AbstractManager/util"
+	"github.com/Super-Gagaga/AbstractManager/util"
 
 	"gorm.io/gorm"
 )

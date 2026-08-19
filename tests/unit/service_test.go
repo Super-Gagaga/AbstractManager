@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"AbstractManager/service"
-	"AbstractManager/tests/testutil"
-	"AbstractManager/util/filter_translator"
+	"github.com/Super-Gagaga/AbstractManager/service"
+	"github.com/Super-Gagaga/AbstractManager/tests/testutil"
+	"github.com/Super-Gagaga/AbstractManager/util/filter_translator"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"

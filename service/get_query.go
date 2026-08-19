@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"AbstractManager/util"
-	"AbstractManager/util/filter_translator"
+	"github.com/Super-Gagaga/AbstractManager/util"
+	"github.com/Super-Gagaga/AbstractManager/util/filter_translator"
 
 	"gorm.io/gorm"
 )

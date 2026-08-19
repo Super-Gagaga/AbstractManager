@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"AbstractManager/service"
-	"AbstractManager/util/filter_translator"
+	"github.com/Super-Gagaga/AbstractManager/service"
+	"github.com/Super-Gagaga/AbstractManager/util/filter_translator"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

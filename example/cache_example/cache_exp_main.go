@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"AbstractManager/example/cache_example/model"
-	"AbstractManager/http_router"
-	"AbstractManager/service"
+	"github.com/Super-Gagaga/AbstractManager/example/cache_example/model"
+	"github.com/Super-Gagaga/AbstractManager/http_router"
+	"github.com/Super-Gagaga/AbstractManager/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"

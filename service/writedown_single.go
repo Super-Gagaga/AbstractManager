@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"AbstractManager/util"
+	"github.com/Super-Gagaga/AbstractManager/util"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"

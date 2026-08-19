@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"AbstractManager/service"
+	"github.com/Super-Gagaga/AbstractManager/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

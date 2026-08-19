@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"AbstractManager/service"
-	"AbstractManager/util/filter_translator"
+	"github.com/Super-Gagaga/AbstractManager/service"
+	"github.com/Super-Gagaga/AbstractManager/util/filter_translator"
 )
 
 // =============================================================================
