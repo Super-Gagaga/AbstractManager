@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -26,13 +27,12 @@ func initEnv() {
 	// 生产环境通常由系统环境变量注入
 	_ = godotenv.Load()
 	user := os.Getenv("DB_USER")
-	pass := os.Getenv("DB_PASSWORD")
 	host := os.Getenv("DB_HOST")
 	port := os.Getenv("DB_PORT")
 	name := os.Getenv("DB_NAME")
 
+	// 只打印非敏感配置;密码等凭据任何环境都不应输出到日志
 	log.Printf("DB_USER: %s", user)
-	log.Printf("DB_PASSWORD: %s", pass) // 生产环境不要打印密码
 	log.Printf("DB_HOST: %s", host)
 	log.Printf("DB_PORT: %s", port)
 	log.Printf("DB_NAME: %s", name)
@@ -40,7 +40,7 @@ func initEnv() {
 
 ////////////////////////////////////////////////////////////////////////////////
 //                            基础设施初始化层（Infra）
-// 负责数据库、缓存等“外部资源”的创建与销毁
+// 负责数据库、缓存等"外部资源"的创建与销毁
 // ❗ 不包含任何业务逻辑
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -101,7 +101,7 @@ func initServices() *service.ServiceManager[model.User] {
 
 ////////////////////////////////////////////////////////////////////////////////
 //                               Router 初始化层
-// 负责把 Service “暴露”为 HTTP API
+// 负责把 Service "暴露"为 HTTP API
 // 这里是示例代码最重要的阅读入口
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -175,87 +175,59 @@ func registerUserLookupRoutes(
 //
 //	业务回调示例：活跃用户筛选逻辑
 //
-// 这是一个“可插拔”的业务函数：
+// 这是一个"可插拔"的业务函数：
 // - Router 只负责调用
 // - 业务逻辑完全独立
 // //////////////////////////////////////////////////////////////////////////////
-// activeUserFilter 筛选出 status == 1 的活跃用户 key
-// 功能：从传入的一堆 Redis key 中，找出那些 status 字段值为 "1" 的 key（代表活跃用户）
+// activeUserFilter 筛选出 status == "active" 的活跃用户 key
 // 参数：
 //   - ctx: 上下文，用于超时控制和取消
 //   - client: Redis 客户端
 //   - keys: 要检查的 Redis key 列表（通常是 "user:123" 这种格式）
+//
+// 注意：WritedownRouterGroup 写入缓存时用的是 SET(JSON 字符串)，
+// 所以这里要用 GET 拿到 JSON 后在内存中反序列化筛选，
+// 而不是 HGET——对 string 类型的 key 执行 HGET 会返回 WRONGTYPE 错误
 func activeUserFilter(
 	ctx context.Context,
 	client *redis.Client,
 	keys []string,
 ) ([]string, error) {
-
-	// 如果传入的 key 列表为空，直接返回 nil, nil
-	// 避免无意义的后续操作，也是一种防御性编程
 	if len(keys) == 0 {
 		return nil, nil
 	}
 
-	// 创建一个 Redis Pipeline（管道），用于批量发送命令，减少网络往返次数
-	// 这是性能优化的关键：原本要发 N 次请求，现在只发一次 + 一次接收结果
+	// Pipeline 批量提交所有 GET 命令：原本 N 次网络往返合并为 1 次
 	pipe := client.Pipeline()
-
-	// 用 map 来保存每个 key 对应的 *redis.StringCmd 对象
-	// 后面可以通过 key 找到对应命令的结果
-	// 容量预设为 len(keys)，避免 map 扩容带来的性能损耗
-	statusCmds := make(map[string]*redis.StringCmd, len(keys))
-
-	// 遍历所有传入的 key
+	getCmds := make(map[string]*redis.StringCmd, len(keys))
 	for _, key := range keys {
-		// 在 pipeline 中加入一条 HGet 命令：从 Hash 结构中获取 key 对应的 "status" 字段
-		// 返回的是 *redis.StringCmd 对象（命令对象，还没执行）
-		// 相当于说：“等会儿一起执行时，把这个 key 的 status 取出来”
-		statusCmds[key] = pipe.HGet(ctx, key, "status")
+		getCmds[key] = pipe.Get(ctx, key)
 	}
 
-	// 执行整个 pipeline（一次性把所有 HGet 命令发给 Redis）
-	// _, err := ... 这里的 _ 是忽略返回的命令结果切片，因为我们后面会通过 cmd.Result() 逐个取
-	// 如果执行出错，且不是 redis.Nil（redis.Nil 表示某个 key 没找到，但我们允许这种情况）
-	// 就返回错误
-	_, err := pipe.Exec(ctx)
-	if err != nil && err != redis.Nil {
-		// 包装错误，带上上下文信息，方便定位问题
+	// 某些 key 不存在时 Exec 会返回 redis.Nil，属于正常情况，放行
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("pipeline exec failed: %w", err)
 	}
 
-	// 准备结果切片，用于收集符合条件的活跃用户 key
 	var activeKeys []string
-
-	// 遍历刚才保存的每个命令对象
-	for key, cmd := range statusCmds {
-		// 获取这条 HGet 命令的执行结果
-		// status 是字段值（字符串），err 是执行这条命令时的错误
-		status, err := cmd.Result()
-
-		if err == redis.Nil {
-			// 情况1：key 存在，但 Hash 里没有 "status" 这个字段
-			// 我们选择跳过，不认为它是活跃用户
-			// （也可以根据业务定义为非活跃或抛异常，这里按宽松处理）
-			continue
-		}
-
+	for key, cmd := range getCmds {
+		raw, err := cmd.Bytes()
 		if err != nil {
-			// 情况2：执行这条命令时出了其他错误（比如网络问题、类型断言失败等）
-			// 打印警告日志，但不中断整个函数（容错设计）
-			log.Printf("warn: failed to get status for %s: %v", key, err)
+			// key 不存在或已过期，跳过
 			continue
 		}
 
-		// 情况3：正常拿到值，且值为 "1" → 说明是活跃用户
-		if status == "1" {
-			// 把这个 key 加入结果列表
+		var user model.User
+		if err := json.Unmarshal(raw, &user); err != nil {
+			log.Printf("warn: failed to unmarshal %s: %v", key, err)
+			continue
+		}
+
+		if user.Status == "active" {
 			activeKeys = append(activeKeys, key)
 		}
-		// 其他值（比如 "0"、"2" 或其他）就直接忽略
 	}
 
-	// 最后返回筛选出的活跃用户 key 列表，和 nil 错误
 	return activeKeys, nil
 }
 
@@ -276,7 +248,7 @@ func runGinServer(r *gin.Engine) {
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                    main
-// main 只负责“组织流程”，不承载任何具体实现细节
+// main 只负责"组织流程"，不承载任何具体实现细节
 ////////////////////////////////////////////////////////////////////////////////
 
 func main() {
