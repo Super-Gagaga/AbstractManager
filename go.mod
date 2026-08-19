@@ -1,4 +1,4 @@
-module github.com/Super-Gagaga/AbstractManager
+module github.com/Super-Gagaga/abstract-manager
 
 go 1.24.0
 

@@ -35,8 +35,8 @@ import (
     "github.com/gin-gonic/gin"
     "gorm.io/gorm"
     
-    "github.com/Super-Gagaga/AbstractManager/http_router"
-    "github.com/Super-Gagaga/AbstractManager/service"
+    "github.com/Super-Gagaga/abstract-manager/http_router"
+    "github.com/Super-Gagaga/abstract-manager/service"
 )
 
 // 数据模型

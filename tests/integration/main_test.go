@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Super-Gagaga/AbstractManager/service"
+	"github.com/Super-Gagaga/abstract-manager/service"
 
 	"github.com/alicebob/miniredis/v2"
 )

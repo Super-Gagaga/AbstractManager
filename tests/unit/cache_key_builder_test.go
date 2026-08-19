@@ -3,8 +3,8 @@ package unit
 import (
 	"testing"
 
-	"github.com/Super-Gagaga/AbstractManager/tests/testutil"
-	"github.com/Super-Gagaga/AbstractManager/util/cache_key_builder"
+	"github.com/Super-Gagaga/abstract-manager/tests/testutil"
+	"github.com/Super-Gagaga/abstract-manager/util/cache_key_builder"
 
 	"github.com/stretchr/testify/assert"
 )

@@ -39,8 +39,8 @@ import (
     "github.com/gin-gonic/gin"
     "time"
 
-    "github.com/Super-Gagaga/AbstractManager/http_router"
-    "github.com/Super-Gagaga/AbstractManager/service"
+    "github.com/Super-Gagaga/abstract-manager/http_router"
+    "github.com/Super-Gagaga/abstract-manager/service"
 )
 
 // 假设已有模型 User

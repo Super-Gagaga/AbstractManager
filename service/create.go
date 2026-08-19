@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Super-Gagaga/AbstractManager/util"
+	"github.com/Super-Gagaga/abstract-manager/util"
 
 	"gorm.io/gorm"
 )

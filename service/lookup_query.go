@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Super-Gagaga/AbstractManager/util"
+	"github.com/Super-Gagaga/abstract-manager/util"
 
 	"gorm.io/gorm"
 )

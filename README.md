@@ -2,7 +2,7 @@
 
 > 基于 Go 泛型的缓存管理框架:一套 `ServiceManager` 统一管理 **Redis 缓存 ↔ 关系型数据库** 的读写与同步,四个自动化路由组直接生成标准 RESTful API,无需手写路由处理函数。
 
-[![Go](https://github.com/Super-Gagaga/AbstractManager/actions/workflows/go.yml/badge.svg)](https://github.com/Super-Gagaga/AbstractManager/actions/workflows/go.yml)
+[![Go](https://github.com/Super-Gagaga/abstract-manager/actions/workflows/go.yml/badge.svg)](https://github.com/Super-Gagaga/abstract-manager/actions/workflows/go.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -106,15 +106,15 @@ flowchart TD
 ### 安装
 
 ```bash
-go get github.com/Super-Gagaga/AbstractManager
+go get github.com/Super-Gagaga/abstract-manager
 ```
 
 框架根目录没有 Go 文件,请按需导入子包:
 
 ```go
 import (
-    "github.com/Super-Gagaga/AbstractManager/http_router"
-    "github.com/Super-Gagaga/AbstractManager/service"
+    "github.com/Super-Gagaga/abstract-manager/http_router"
+    "github.com/Super-Gagaga/abstract-manager/service"
 )
 ```
 

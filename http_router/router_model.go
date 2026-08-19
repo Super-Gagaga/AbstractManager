@@ -1,7 +1,7 @@
 package http_router
 
 import (
-	serviceManager "github.com/Super-Gagaga/AbstractManager/service"
+	serviceManager "github.com/Super-Gagaga/abstract-manager/service"
 )
 
 // HTTPRouterManager 封装了 ServiceManager 并提供 HTTP 路由注册功能

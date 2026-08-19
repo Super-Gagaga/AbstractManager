@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Super-Gagaga/AbstractManager/service"
-	"github.com/Super-Gagaga/AbstractManager/util"
-	"github.com/Super-Gagaga/AbstractManager/util/filter_translator"
+	"github.com/Super-Gagaga/abstract-manager/service"
+	"github.com/Super-Gagaga/abstract-manager/util"
+	"github.com/Super-Gagaga/abstract-manager/util/filter_translator"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"

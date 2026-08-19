@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Super-Gagaga/AbstractManager/util"
+	"github.com/Super-Gagaga/abstract-manager/util"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Super-Gagaga/AbstractManager/service"
-	"github.com/Super-Gagaga/AbstractManager/util/filter_translator"
+	"github.com/Super-Gagaga/abstract-manager/service"
+	"github.com/Super-Gagaga/abstract-manager/util/filter_translator"
 
 	"github.com/alicebob/miniredis/v2"
 )

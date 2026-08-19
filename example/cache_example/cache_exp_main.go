@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/Super-Gagaga/AbstractManager/example/cache_example/model"
-	"github.com/Super-Gagaga/AbstractManager/http_router"
-	"github.com/Super-Gagaga/AbstractManager/service"
+	"github.com/Super-Gagaga/abstract-manager/example/cache_example/model"
+	"github.com/Super-Gagaga/abstract-manager/http_router"
+	"github.com/Super-Gagaga/abstract-manager/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"

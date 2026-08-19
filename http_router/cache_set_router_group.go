@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Super-Gagaga/AbstractManager/service"
-	"github.com/Super-Gagaga/AbstractManager/util"
-	"github.com/Super-Gagaga/AbstractManager/util/cache_key_builder"
+	"github.com/Super-Gagaga/abstract-manager/service"
+	"github.com/Super-Gagaga/abstract-manager/util"
+	"github.com/Super-Gagaga/abstract-manager/util/cache_key_builder"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
