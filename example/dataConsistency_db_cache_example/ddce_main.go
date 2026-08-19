@@ -1,13 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/Super-Gagaga/AbstractManager/example/dataConsistency_db_cache_example/model"
 	"github.com/Super-Gagaga/AbstractManager/http_router"
 	"github.com/Super-Gagaga/AbstractManager/service"
 	"github.com/Super-Gagaga/AbstractManager/util"
-	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
