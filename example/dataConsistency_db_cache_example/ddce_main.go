@@ -50,7 +50,7 @@ func initServices() *service.ServiceManager[model.User] {
 // --- Router 注册 ---
 
 func initRouter(userSvc *service.ServiceManager[model.User]) *gin.Engine {
-	r := gin.Default()
+	r := http_router.New()
 	group := r.Group("/api/v1/users")
 
 	// Writedown 路由

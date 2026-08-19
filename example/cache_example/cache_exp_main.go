@@ -107,7 +107,7 @@ func initServices() *service.ServiceManager[model.User] {
 
 func initRouter(userSvc *service.ServiceManager[model.User]) *gin.Engine {
 	// Gin Engine 是整个 HTTP 层的根
-	r := gin.Default()
+	r := http_router.New()
 
 	// 注册用户相关的写入接口
 	registerUserWriteRoutes(r, userSvc)

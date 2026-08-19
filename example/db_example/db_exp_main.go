@@ -90,7 +90,7 @@ func seedProducts(productSvc *service.ServiceManager[model.Product]) {
 ////////////////////////////////////////////////////////////////////////////////
 
 func initRouter(productSvc *service.ServiceManager[model.Product]) *gin.Engine {
-	r := gin.Default()
+	r := http_router.New()
 	group := r.Group("/api/v1/products")
 
 	// ---- 数据库写入:POST /set、PUT /update、DELETE /delete、
