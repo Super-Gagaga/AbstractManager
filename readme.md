@@ -24,6 +24,23 @@ AbstractManager 是一个基于 Go 的缓存管理框架，旨在简化 Redis �
 
 ## 快速开始
 
+### 安装
+
+```bash
+go get github.com/Super-Gagaga/AbstractManager
+```
+
+本框架根目录不包含 Go 文件，请按需导入子包：
+
+```go
+import (
+    "github.com/Super-Gagaga/AbstractManager/http_router"
+    "github.com/Super-Gagaga/AbstractManager/service"
+)
+```
+
+> 国内网络环境可使用 `GOPROXY=https://goproxy.cn,direct` 加速下载。
+
 ### 环境要求
 
 - Go 1.24
@@ -32,7 +49,7 @@ AbstractManager 是一个基于 Go 的缓存管理框架，旨在简化 Redis �
 
 ### 配置环境变量
 
-创建 `.env` 文件：
+创建 `.env` 文件（可参考仓库中的 [.env.example](./.env.example)）：
 
 ```env
 DB_USER=your_db_user
