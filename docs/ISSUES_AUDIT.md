@@ -1,9 +1,9 @@
 # AbstractManager 代码审计问题清单
 
-> 审计日期：2026-06-06（2026-06-07 更新 #19）
-> 审计范围：全项目（`service/` `http_router/` `util/` `example/`）
+> 审计日期：2026-06-06（2026-08-19 复审计）
+> 审计范围：全项目（`service/` `http_router/` `util/` `example/` `tests/`）
 > 问题总数：20
-> 已解决：17 / 未解决：3
+> 已解决：20 / 部分解决：0 / 未解决：0（#14 需在 GitHub 侧同步仓库改名方可生效）
 
 ---
 
@@ -67,8 +67,8 @@ func scanAllKeys(ctx context.Context, client *redis.Client, pattern string) ([]s
 
 | 属性 | 内容 |
 |------|------|
-| **文件** | [service/set_query.go#L184](service/set_query.go#L184) 、 [service/get_query.go#L168-L169](service/get_query.go#L168-L169) 、 [service/get_query.go#L185](service/get_query.go#L185) 、 [util/filter_translator/grom_filter.go](util/filter_translator/grom_filter.go) |
-| **状态** | ✅ 已解决 |
+| **文件** | [service/set_query.go](service/set_query.go) 、 [service/get_query.go](service/get_query.go) 、 [util/filter_translator/grom_filter.go](util/filter_translator/grom_filter.go) 、 [service/set_single.go](service/set_single.go) |
+| **状态** | ✅ 已解决（2026-08-19，单条 Increment/Decrement 校验补齐） |
 
 **问题：**
 
@@ -100,6 +100,26 @@ func (sm *ServiceManager[T]) BatchIncrement(ctx context.Context, column string, 
 ```
 
 或者直接用 GORM 的安全方法 `db.UpdateColumn(clause.Column{Name: column}, ...)` 。
+
+**⚠️ 遗留（2026-08-19 复审计，同日修复）：**
+
+单条记录的 `Increment` / `Decrement` 曾缺少列名校验，且经由 HTTP 路由暴露：
+
+- [service/set_single.go](service/set_single.go)：`gorm.Expr(fmt.Sprintf("%s + ?", column))` 直接拼接 `column`
+- [http_router/set_router_group.go](http_router/set_router_group.go)：`POST /increment` 路由把请求体里的 `req.Column` 透传进来，仅做了非空校验
+
+批量版 `BatchIncrement` / `BatchDecrement`（[service/set_query.go](service/set_query.go)）已有 `ValidateSQLIdentifier`，单条版已按相同方式补齐：
+
+```go
+func (sm *ServiceManager[T]) Increment(ctx context.Context, column string, value interface{}, ...) error {
+    if err := filter_translator.ValidateSQLIdentifier(column); err != nil {
+        return fmt.Errorf("invalid column name %q: %w", column, err)
+    }
+    // ...
+}
+```
+
+**修复验证：** [tests/unit/increment_validation_test.go](../tests/unit/increment_validation_test.go) 覆盖 5 种恶意列名在 Increment / Decrement 入口被拒（校验先于任何 DB 访问）；[tests/router/write_router_test.go](../tests/router/write_router_test.go) 验证 `POST /increment` 携带恶意列名时不触达数据库即返回错误。
 
 ---
 
@@ -148,19 +168,19 @@ func (lrg *LookupRouterGroup[T]) loadFromDBAndCache(...) (...) {
 
 **修复：**
 
-现已添加完整测试套件：
+现已添加完整测试套件（约 230 个测试函数 + 52 个基准测试），使用 `miniredis` 做 Redis mock、`sqlmock` 做 DB mock：
 
-| 测试文件 | 覆盖范围 | 测试数 |
-|----------|---------|--------|
-| [tests/race_and_perf_test.go](../../tests/race_and_perf_test.go) | 竞态检测 (11 个) + 性能基准 (22 个) | 33 |
-| [service/extract_test.go](../../service/extract_test.go) | extractID / buildCacheKey | 16 |
-| [service/query_options_test.go](../../service/query_options_test.go) | QueryOptions 安全校验 | 28 |
-| [util/filter_translator/tofloat64_test.go](../../util/filter_translator/tofloat64_test.go) | toFloat64 转换 | 11 |
-| [util/filter_translator/validate_test.go](../../util/filter_translator/validate_test.go) | SQL 标识符校验 | 17 |
-| [util/cache_key_builder/cache_key_builder_test.go](../../util/cache_key_builder/cache_key_builder_test.go) | Key builder 构建 | 12 |
-| [example/dataConsistency_db_cache_example/ddce_test.go](../../example/dataConsistency_db_cache_example/ddce_test.go) | 集成测试 | 多个 |
-
-使用 `miniredis` 做 Redis mock，`sqlmock` 做 DB mock。
+| 测试目录/文件 | 覆盖范围 |
+|----------|---------|
+| [tests/unit/](../../tests/unit/) | cache_key_builder、env、filter_translator、service、logger 单元测试 |
+| [tests/router/](../../tests/router/) | HTTP 路由：query / cache / write / middleware |
+| [tests/race_perf/](../../tests/race_perf/) | 竞态检测（12 个 `TestRace_*`）+ 性能基准（52 个 `Benchmark*`）|
+| [tests/integration/](../../tests/integration/) | 集成测试 |
+| [tests/testutil/](../../tests/testutil/) | 测试替身 / 录制 fixture |
+| [service/extract_test.go](../../service/extract_test.go) | extractID / buildCacheKey |
+| [service/query_options_test.go](../../service/query_options_test.go) | QueryOptions 安全校验 |
+| [util/context_test.go](../../util/context_test.go) | EnsureTimeout 超时兜底 |
+| [util/filter_translator/tofloat64_test.go](../../util/filter_translator/tofloat64_test.go) | toFloat64 转换 |
 
 ---
 
@@ -168,8 +188,8 @@ func (lrg *LookupRouterGroup[T]) loadFromDBAndCache(...) (...) {
 
 | 属性 | 内容 |
 |------|------|
-| **文件** | [service/sql_pool.go#L19](service/sql_pool.go#L19) 、 [service/cache_pool.go#L18](service/cache_pool.go#L18) |
-| **状态** | ❌ 未解决 |
+| **文件** | [service/sql_pool.go](service/sql_pool.go) 、 [service/cache_pool.go](service/cache_pool.go) 、 [service/service_model.go](service/service_model.go) |
+| **状态** | ✅ 已解决（2026-08-19，非破坏性注入方案） |
 
 **问题：**
 
@@ -187,29 +207,16 @@ func GetRedis() *redis.Client { return globalRedisManager.Client } // 到处都�
 - 并发场景下 `InitDB()` 被多次调用没有保护
 - 所有 `ServiceManager` 方法都隐形依赖全局状态，调用者根本不知道
 
-**建议修复：**
+**修复（2026-08-19）：**
 
-```go
-// 将依赖注入 ServiceManager
-type ServiceManager[T any] struct {
-    Resource     T
-    ResourceName string
-    TableName    string
-    db           *gorm.DB          // 注入
-    redis        *redis.Client     // 注入
-}
+未采用"修改 `NewServiceManager` 构造函数签名"的破坏性方案，改为**实例级可选注入 + 全局回退**，对现有调用方零破坏：
 
-func NewServiceManager[T any](resource T, db *gorm.DB, redis *redis.Client) *ServiceManager[T] {
-    return &ServiceManager[T]{
-        Resource:     resource,
-        ResourceName: getTypeName(resource),
-        db:           db,
-        redis:        redis,
-    }
-}
-```
+- [service/service_model.go](service/service_model.go) — `ServiceManager` 新增私有 `db` / `redisClient` 字段与链式注入方法 `WithDB(db)` / `WithRedis(client)`；`DB()` / `Redis()` 访问器优先返回实例注入，未注入时回退全局单例
+- `service` 全部内部调用点（约 50 处 `GetDB()` / `GetRedis()`）已切换为 `sm.DB()` / `sm.Redis()`；`GetRedisManager()` 同样感知实例注入
+- [http_router/cache_get_router_group.go](http_router/cache_get_router_group.go) 的 3 处 `service.GetRedis()` 改走 `lrg.Service.Redis()`，路由组随 ServiceManager 一起支持多实例
+- 全局侧补齐对称注入点：`SetGlobalRedis(client)` 与 `SetGlobalDB(db)` 对称，且传 nil 可恢复未初始化状态，便于测试隔离
 
-保留全局单例作为默认的 convenience 函数（`GetDB()`），但让 `ServiceManager` 同时支持注入。
+**效果：** 可测试性——`tests/unit/di_test.go` 演示了在全局 DB/Redis 均未初始化的进程里，通过 `WithDB`(sqlmock) / `WithRedis`(miniredis) 独立驱动实例；可扩展性——一个进程可以按模型分别注入不同的 DB/Redis。全局单例保留为默认 convenience 路径（`InitDB` / `InitRedis` + 回退），审计原建议"构造函数强制注入"被判定为不必要的破坏性变更。
 
 ---
 
@@ -481,17 +488,20 @@ Having map[string]interface{} // 完全丢失类型安全
 | 属性 | 内容 |
 |------|------|
 | **文件** | [go.mod#L1](go.mod#L1) |
-| **状态** | ❌ 未解决 |
+| **状态** | ✅ 已解决（2026-08-19，待仓库同步改名） |
 
 ```go
-module AbstractManager  // 大写开头，不符合 Go module 惯例
+module github.com/Super-Gagaga/abstract-manager  // 仓库段已小写化
 ```
 
-**建议修复：**
+**修复（2026-08-19）：**
 
-```go
-module github.com/sukasukasuka123/abstract-manager
-```
+模块已从 `github.com/Super-Gagaga/AbstractManager` 重命名为 `github.com/Super-Gagaga/abstract-manager`（仓库段小写 + 连字符，符合 Go 惯例；用户名段保持 GitHub 账号规范大小写，与 `github.com/BurntSushi/toml` 同理）。全仓库约 42 处引用（go.mod、import、README、docs）已同步更新，全部测试通过。
+
+**⚠️ 需要配套的仓库操作（代码之外的步骤）：**
+
+1. 在 GitHub 上把仓库重命名为 `abstract-manager`（Settings → Rename）——`go get` 通过 `?go-get=1` 元信息做路径精确匹配（大小写敏感），仓库不改名则新模块路径无法解析；
+2. 重命名后打 tag 发布（如 `v0.2.0`）。旧路径 `.../AbstractManager` 的引用会因元信息不匹配而失败，属预期行为——v0.1.0 此前已被 retract，实际上不存在可用的外部消费者，改名窗口成本为零。
 
 ---
 
@@ -609,11 +619,17 @@ func (sm *ServiceManager[T]) GetQueryWithoutTransaction(ctx context.Context, ...
 
 ### 20. 日志策略零规划
 
-全部使用 `log.Printf` / `fmt.Printf` 混打，没有结构化日志、没有日志级别、没有 trace ID。排障时你基本只能靠 `grep`。
+> **状态:** ✅ 已解决 (2026-08-19)
 
-**建议：**
+原问题：全部使用 `log.Printf` / `fmt.Printf` 混打，没有结构化日志、日志级别、trace ID。
 
-引入 `slog`（Go 1.21+ 标准库自带）或 `zap`，统一日志格式。
+**修复方案：** 引入 Go 标准库 `slog`，统一日志体系：
+
+- [util/logger/logger.go](../../util/logger/logger.go) — 统一日志入口，支持 `LOG_LEVEL`（debug/info/warn/error）、`LOG_FORMAT`（text/json），测试进程自动降级静默；`WithRequestID` / `FromContext` 自动携带 request_id
+- [http_router/middleware.go](../../http_router/middleware.go) — `RequestLogger` 中间件透传/生成 `X-Request-ID` 并输出结构化访问日志；`Recovery` 替代 `gin.Recovery` 输出带堆栈的 panic 日志
+- [service/gorm_logger.go](../../service/gorm_logger.go) — 将 GORM SQL 日志桥接到 slog（`db.error` / `db.slow_query` / `db.sql`），并做 DSN 密码脱敏
+
+核心 service 层错误路径已改用 `logger.FromContext(ctx)` 输出结构化日志（如 [service/writedown_single.go](service/writedown_single.go)、[service/set_query.go](service/set_query.go)）。示例 [ddce_main.go](example/dataConsistency_db_cache_example/ddce_main.go) 中的 `log.Printf` 属应用层示例代码，框架层已统一。
 
 ---
 
@@ -621,10 +637,10 @@ func (sm *ServiceManager[T]) GetQueryWithoutTransaction(ctx context.Context, ...
 
 | 优先级 | 问题编号 | 理由 |
 |--------|----------|------|
-| P0 立即修 | ~~#1 KEYS~~、~~#2 SQL注入~~、~~#3 硬编码key~~ → 全部完成 | 安全问题 + 生产可用性 |
+| P0 立即修 | ~~#1 KEYS~~、~~#3 硬编码key~~、~~#2 SQL注入（批量路径 + 单条 Increment/Decrement）~~ → 全部完成 | 安全问题 + 生产可用性 |
 | P1 本周修 | ~~#6 错误静默~~、~~#7 Graceful Shutdown~~、~~#9 goroutine生命周期~~、~~#10 toFloat64~~、~~#11 createIndex~~ → 全部完成 | 线上稳定性基础 |
-| P2 本月修 | ~~#4 测试~~ → 已完成、#5 全局单例 | 可靠性保障 |
-| P3 下个迭代 | #14 module命名、#20 日志策略 | 工程质量 |
+| P2 本月修 | ~~#4 测试~~、~~#5 全局单例（实例级注入方案）~~ → 已完成 | 可靠性保障 |
+| P3 下个迭代 | ~~#14 module命名~~ → 已完成（待 GitHub 仓库同步改名）、~~#20 日志策略~~ → 已完成 | 工程质量 |
 | ~~P3 下个迭代~~ | ~~#12-#13~~、~~#15-#18~~、~~#19 context超时~~ → 全部完成 | 工程质量 |
 
 ---
@@ -636,15 +652,20 @@ func (sm *ServiceManager[T]) GetQueryWithoutTransaction(ctx context.Context, ...
 | 设计思路 | ⭐⭐⭐⭐ |
 | 代码质量 | ⭐⭐⭐ |
 | 安全性 | ⭐⭐⭐⭐ |
-| 可测试性 | ⭐⭐⭐ |
-| 生产就绪度 | ⭐⭐⭐ |
+| 可测试性 | ⭐⭐⭐⭐ |
+| 生产就绪度 | ⭐⭐⭐⭐ |
 | 文档完整度 | ⭐⭐⭐⭐ |
 
-核心矛盾：设计方向正确但实现偏差太大。框架最有价值的泛型抽象在关键路径上被硬编码破坏，全局状态依赖和 SQL 注入是两个最硬的坎。
+核心矛盾：设计方向正确，早期的硬编码 key、SQL 注入、全局状态等问题已全部修复；全局单例以「实例级可选注入 + 全局回退」的非破坏性方案解决，模块路径已小写化。
 
-**P0（已修复 2026-06-06）**：KEYS→SCAN、SQL 注入校验、key 硬编码修复。
-**P1（已修复 2026-06-06）**：错误静默吞掉、Graceful Shutdown、SELECT 冗余事务、goroutine 生命周期、toFloat64 错误、createIndex Unique 修复。
-**P2（已修复 2026-06-07）**：测试覆盖（154+ 单元测试 + 11 竞态测试 + 22 基准测试）。
-**P3-P4 中等/建议（已修复 2026-06-06）**：重复函数提取到 util/env.go、Having 结构化条件、typo import 修正、WritedownQuery 改用 Pipeline、lookupFromDB key 修复、InvalidateCacheByPattern SCAN 化。
-**🔵 建议（已修复 2026-06-07）**：#19 context 超时全线覆盖（DB 30s / Redis 10s / DDL 60s 兜底）。
-剩余工作：#5 全局单例、#14 module 命名、#20 日志策略。
+**P0（已修复）**：KEYS→SCAN、SQL 注入校验（批量路径 + 过滤/排序/分组）、key 硬编码修复。
+**P1（已修复）**：错误静默吞掉、Graceful Shutdown、SELECT 冗余事务、goroutine 生命周期（worker pool）、toFloat64 错误、createIndex Unique 修复。
+**P2（已修复）**：测试覆盖（约 230 个测试函数 + 52 个基准测试，分布 `tests/unit`、`tests/router`、`tests/race_perf`、`tests/integration`）；#5 全局单例（`WithDB`/`WithRedis` 实例级注入 + 全局回退，`tests/unit/di_test.go` 覆盖）。
+**P3-P4 中等/建议（已修复）**：重复函数提取到 util/env.go、Having 结构化条件、typo import 修正、WritedownQuery 改用 Pipeline、lookupFromDB key 修复、InvalidateCacheByPattern SCAN 化、#20 日志 slog 化、#14 模块重命名为 `github.com/Super-Gagaga/abstract-manager`。
+**🔵 建议（已修复）**：#19 context 超时全线覆盖（DB 30s / Redis 10s / DDL 60s 兜底）。
+
+**剩余工作：**
+
+- #14 配套操作（代码外）：GitHub 仓库重命名为 `abstract-manager` 并打 tag 发布，新模块路径方可被 `go get` 解析
+
+审计清单 20 项已全部关闭，无代码侧遗留。

@@ -16,6 +16,7 @@
 - [过滤器系统](#过滤器系统)
 - [Cache Aside 模式](#cache-aside-模式)
 - [配置项一览](#配置项一览)
+- [日志](#日志)
 - [测试](#测试)
 - [项目结构](#项目结构)
 - [路线图](#路线图)
@@ -60,24 +61,24 @@
 
 ```mermaid
 flowchart TD
-    A[客户端发起读请求] --> B{查 Redis 缓存}
-    B -- 命中 --> C[可选:按配置刷新 TTL] --> D[返回数据 source=cache]
-    B -- 未命中 --> E[查 MySQL 数据库]
-    E -- 查到 --> F[JSON 序列化写入 Redis 并设置 TTL] --> G[返回数据 source=database]
-    E -- 没查到 --> H[返回 404]
+    A["客户端发起读请求"] --> B{"查 Redis 缓存"}
+    B -- 命中 --> C["可选:按配置刷新 TTL"] --> D["返回数据 source=cache"]
+    B -- 未命中 --> E["查 MySQL 数据库"]
+    E -- 查到 --> F["JSON 序列化写入 Redis 并设置 TTL"] --> G["返回数据 source=database"]
+    E -- 没查到 --> H["返回 404"]
 ```
 
 **缓存 → 数据库批量同步**(示例中的定时任务):
 
 ```mermaid
 flowchart TD
-    A[触发同步(定时任务/手动)] --> B[SCAN 按 key 模式批量读 Redis]
-    B -- 无数据 --> C[结束]
-    B -- 有数据 --> D[过滤、整理为对象列表]
-    D --> E[批量 Upsert 写入 MySQL]
-    E --> F{是否重新缓存?}
-    F -- 是 --> G[Pipeline 回写 Redis 并设置 TTL]
-    F -- 否 --> H[返回同步结果(扫描数/同步数/耗时)]
+    A["触发同步(定时任务/手动)"] --> B["SCAN 按 key 模式批量读 Redis"]
+    B -- 无数据 --> C["结束"]
+    B -- 有数据 --> D["过滤、整理为对象列表"]
+    D --> E["批量 Upsert 写入 MySQL"]
+    E --> F{"是否重新缓存?"}
+    F -- 是 --> G["Pipeline 回写 Redis 并设置 TTL"]
+    F -- 否 --> H["返回同步结果(扫描数/同步数/耗时)"]
     G --> H
 ```
 
@@ -85,12 +86,12 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[main 启动] --> B[加载 .env]
-    B --> C[连接 MySQL + Redis]
-    C --> D[创建 ServiceManager 并建表]
-    D --> E[可选:启动定时同步任务]
-    E --> F[注册路由组]
-    F --> G[监听端口,优雅关闭]
+    A["main 启动"] --> B["加载 .env"]
+    B --> C["连接 MySQL + Redis"]
+    C --> D["创建 ServiceManager 并建表"]
+    D --> E["可选:启动定时同步任务"]
+    E --> F["注册路由组"]
+    F --> G["监听端口,优雅关闭"]
 ```
 
 ---
@@ -575,8 +576,27 @@ lookupRg.SetCustomFilter(activeUserFilter)
 | `REDIS_TIMEOUT_SECONDS` | — | `10` | Redis 操作默认超时 |
 | `DDL_TIMEOUT_SECONDS` | — | `60` | 建表等 DDL 操作默认超时 |
 | `PORT` | — | `8080` | 示例服务监听端口 |
+| `LOG_LEVEL` | — | `info` | 框架日志级别:`debug` / `info` / `warn` / `error` |
+| `LOG_FORMAT` | — | `text` | 日志格式:`text`(开发)/ `json`(生产聚合) |
+| `DB_SLOW_QUERY_MS` | — | `500` | SQL 慢查询阈值(毫秒),超过记为 `db.slow_query` |
 
 > 框架内部通过 `util.EnsureTimeout` 应用超时:仅在 context 尚无 deadline 时补充,不会覆盖调用方已设置的超时。
+
+---
+
+## 日志
+
+框架基于标准库 `log/slog`,内部不直接打印,统一经 `util/logger` 上报:
+
+```go
+// 宿主注入自己的 logger(不注入则按上表环境变量构造默认值)
+logger.SetLogger(mySlogLogger)   // slog.New(slog.NewJSONHandler(os.Stdout, nil))
+```
+
+- **SQL 日志**:GORM 已桥接到 slog——错误记 `db.error`(Error),慢查询记 `db.slow_query`(Warn,阈值 `DB_SLOW_QUERY_MS`),常规 SQL 仅在 `LOG_LEVEL=debug` 时输出;错误信息中的 DSN 密码会自动脱敏。
+- **请求链路**:`http_router.New()` 替代 `gin.Default()`,自动生成/透传 `X-Request-ID` 并注入 context;service 层日志自动携带 `request_id`,一条 HTTP 请求的访问日志与它的缓存/数据库操作可按 `request_id` 聚合。
+- **关键事件**(可按 `event` 字段配告警):`async_cache.queue_dropped`(异步队列满丢任务,Error)、`async_cache.write_failed`(Error)、`cache.invalidate_failed` / `cache.backfill_failed` / `cache.ttl_refresh_failed`(Warn)、`http.request`(访问日志)、`http.panic`(panic 恢复)。
+- 测试进程中默认降级为 `warn` 且丢弃输出,保证 `go test` 静默。
 
 ---
 
@@ -585,7 +605,7 @@ lookupRg.SetCustomFilter(activeUserFilter)
 测试不依赖外部服务:集成与并发测试使用进程内的 [miniredis](https://github.com/alicebob/miniredis),数据库层测试使用 [go-sqlmock](https://github.com/DATA-DOG/go-sqlmock)。
 
 ```bash
-# 全部测试(单元 + 集成 + 并发)
+# 全部测试(单元 + 集成 + 路由 + 并发)
 go test ./...
 
 # 仅单元测试
@@ -594,11 +614,14 @@ go test -v ./tests/unit/...
 # 仅集成测试
 go test -v ./tests/integration/...
 
+# HTTP 路由层测试(miniredis + sqlmock)
+go test -v ./tests/router/...
+
 # 竞态检测(CI 必跑;Windows 下需启用 CGO 并安装 GCC)
 go test -race -count=1 ./tests/race_perf/...
 
 # 基准测试
-go test -bench=. -benchmem ./tests/race_perf/
+go test -run='^$' -bench=. -benchmem ./tests/race_perf/
 ```
 
 CI(GitHub Actions,Go 1.24 / 1.25 矩阵)会在每次 push / PR 时执行构建、单元、集成与竞态测试,见 [go.yml](./.github/workflows/go.yml)。性能基准结果分析见 [docs/performance_heatmap.md](./docs/performance_heatmap.md)。
@@ -630,7 +653,8 @@ AbstractManager/
 │   ├── filter_translator/  # 过滤器翻译:FilterParam → GORM / Redis
 │   ├── cache_key_builder/  # 缓存 key 构建器(模板 / 前缀 / 函数)
 │   ├── context.go          # 超时控制(EnsureTimeout)
-│   └── env.go              # 环境变量读取(Cache-Aside TTL 等)
+│   ├── env.go              # 环境变量读取(Cache-Aside TTL 等)
+│   └── logger/             # 统一日志入口(slog,可注入)
 ├── example/
 │   ├── db_example/                       # 数据库读写示例(Write + Query 路由组)
 │   ├── cache_example/                    # 缓存读写 + 自定义过滤器示例
@@ -638,6 +662,7 @@ AbstractManager/
 ├── tests/
 │   ├── unit/         # 单元测试(无外部依赖)
 │   ├── integration/  # 集成测试(miniredis 全链路)
+│   ├── router/       # HTTP 路由层测试(四个路由组,miniredis + sqlmock)
 │   ├── race_perf/    # 并发竞态 + 基准测试
 │   └── testutil/     # 共享测试夹具
 └── docs/             # 审计报告、性能分析、测试计划
