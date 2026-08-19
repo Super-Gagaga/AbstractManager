@@ -43,7 +43,7 @@ func (sm *ServiceManager[T]) WritedownSingle(
 		opts = &WritedownSingleOptions{Expiration: 1 * time.Hour, Overwrite: true}
 	}
 
-	rdb := GetRedis()
+	rdb := sm.Redis()
 
 	valueBytes, err := marshalForRedis(data)
 	if err != nil {
@@ -77,7 +77,7 @@ func (sm *ServiceManager[T]) WritedownSingleWithLock(
 	expiration time.Duration,
 	lockTimeout time.Duration,
 ) (*T, error) {
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 
@@ -126,7 +126,7 @@ func (sm *ServiceManager[T]) WritedownSingleWithVersion(
 	version int64,
 	expiration time.Duration,
 ) error {
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 

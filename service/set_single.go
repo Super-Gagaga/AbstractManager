@@ -37,7 +37,7 @@ func (sm *ServiceManager[T]) SetSingle(
 	// 开启事务闭包
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	err := GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 
 		if opts.OnConflictUpdate {
@@ -71,7 +71,7 @@ func (sm *ServiceManager[T]) Update(
 ) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	return GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 
 		if queryFunc != nil {
@@ -86,7 +86,7 @@ func (sm *ServiceManager[T]) Update(
 func (sm *ServiceManager[T]) Save(ctx context.Context, data *T) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	return GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 		return tx.Save(data).Error
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
@@ -101,7 +101,7 @@ func (sm *ServiceManager[T]) Upsert(
 ) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	return GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 
 		onConflict := clause.OnConflict{}
@@ -126,7 +126,7 @@ func (sm *ServiceManager[T]) Delete(
 ) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	return GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 
 		if queryFunc != nil {
@@ -146,7 +146,7 @@ func (sm *ServiceManager[T]) Increment(
 ) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	return GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 
 		if queryFunc != nil {
@@ -166,7 +166,7 @@ func (sm *ServiceManager[T]) Decrement(
 ) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	return GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 
 		if queryFunc != nil {

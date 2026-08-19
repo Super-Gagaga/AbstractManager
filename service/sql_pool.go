@@ -75,6 +75,16 @@ func GetDB() *gorm.DB {
 	return globalDBManager.DB
 }
 
+// SetGlobalDB 注入全局数据库实例(主要用于测试替身或自定义初始化流程);
+// 传 nil 恢复为未初始化状态
+func SetGlobalDB(db *gorm.DB) {
+	if db == nil {
+		globalDBManager = nil
+		return
+	}
+	globalDBManager = &DBManager{DB: db}
+}
+
 // Close 关闭数据库连接
 func (dm *DBManager) Close() error {
 	sqlDB, err := dm.DB.DB()

@@ -20,7 +20,7 @@ type CreateOptions struct {
 func (sm *ServiceManager[T]) Create(ctx context.Context, opts *CreateOptions) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDDLTimeout())
 	defer cancel()
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	if opts == nil {
 		opts = &CreateOptions{IfNotExists: true}
@@ -61,7 +61,7 @@ func (sm *ServiceManager[T]) CreateWithIndexes(ctx context.Context, opts *Create
 		return err
 	}
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 添加索引
 	for _, idx := range indexes {
@@ -101,7 +101,7 @@ func (sm *ServiceManager[T]) createIndex(db *gorm.DB, idx Index) error {
 func (sm *ServiceManager[T]) DropTable(ctx context.Context) error {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDDLTimeout())
 	defer cancel()
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	tableName := sm.TableName
 	if sm.Schema != "" && sm.Schema != "public" {
@@ -119,7 +119,7 @@ func (sm *ServiceManager[T]) DropTable(ctx context.Context) error {
 func (sm *ServiceManager[T]) HasTable(ctx context.Context) (bool, error) {
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	tableName := sm.TableName
 	if sm.Schema != "" && sm.Schema != "public" {

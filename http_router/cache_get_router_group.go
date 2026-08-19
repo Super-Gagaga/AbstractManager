@@ -161,7 +161,7 @@ func (lrg *LookupRouterGroup[T]) executeLookup(
 	defer cancel()
 
 	// 1. 获取所有匹配的键（使用 SCAN 避免阻塞 Redis）
-	redisClient := service.GetRedis()
+	redisClient := lrg.Service.Redis()
 	allKeys, err := service.ScanKeys(ctx, redisClient, keyPattern, 100)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to scan keys: %w", err)
@@ -255,7 +255,7 @@ func (lrg *LookupRouterGroup[T]) loadFromDBAndCache(
 	}
 
 	// 批量写入缓存
-	rdb := service.GetRedis()
+	rdb := lrg.Service.Redis()
 	pipe := rdb.Pipeline()
 
 	resultMap := make(map[string]*T)
@@ -321,7 +321,7 @@ func (lrg *LookupRouterGroup[T]) extractIDFromKey(key string) (uint, error) {
 // 2. 如果命中：根据配置决定是否刷新 TTL
 // 3. 如果未命中：从 DB 查询，转为 JSON，写入 Redis，设置 TTL
 func (lrg *LookupRouterGroup[T]) getByKeyCacheAside(ctx context.Context, key string) (*T, bool, error) {
-	redisClient := service.GetRedis()
+	redisClient := lrg.Service.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 

@@ -42,7 +42,7 @@ func (sm *ServiceManager[T]) SetQuery(
 	// 使用 Transaction 闭包自动管理提交和回滚
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	err := GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 
 		batchSize := opts.BatchSize
@@ -95,7 +95,7 @@ func (sm *ServiceManager[T]) BatchUpdate(
 	defer cancel()
 
 	var rowsAffected int64
-	err := GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 		if queryFunc != nil {
 			tx = queryFunc(tx)
@@ -126,7 +126,7 @@ func (sm *ServiceManager[T]) BatchUpsert(
 
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	return GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 		if batchSize <= 0 {
 			batchSize = 100
@@ -164,7 +164,7 @@ func (sm *ServiceManager[T]) BatchDelete(
 	var rowsAffected int64
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	err := GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 		if queryFunc != nil {
 			tx = queryFunc(tx)
@@ -196,7 +196,7 @@ func (sm *ServiceManager[T]) BatchIncrement(
 	var rowsAffected int64
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	err := GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 		if queryFunc != nil {
 			tx = queryFunc(tx)
@@ -229,7 +229,7 @@ func (sm *ServiceManager[T]) BatchDecrement(
 	var rowsAffected int64
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
-	err := GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sm.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx = sm.applyTableName(tx)
 		if queryFunc != nil {
 			tx = queryFunc(tx)

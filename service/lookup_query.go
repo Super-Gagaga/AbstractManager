@@ -28,7 +28,7 @@ func (sm *ServiceManager[T]) LookupQuery(
 	keys []string,
 	opts *LookupQueryOptions,
 ) (map[string]*T, error) {
-	redis := GetRedis()
+	redis := sm.Redis()
 
 	if len(keys) == 0 {
 		return make(map[string]*T), nil
@@ -94,7 +94,7 @@ func (sm *ServiceManager[T]) LookupQueryByPattern(
 	pattern string,
 	opts *LookupQueryOptions,
 ) (map[string]*T, error) {
-	redis := GetRedis()
+	redis := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	var allKeys []string
@@ -146,7 +146,7 @@ func (sm *ServiceManager[T]) LookupQueryWithRefresh(
 
 	// 如果有缓存未命中，从数据库查询
 	if len(missedKeys) > 0 {
-		db := GetDB().WithContext(ctx)
+		db := sm.DB().WithContext(ctx)
 		db = sm.applyTableName(db)
 
 		if queryFunc != nil {
@@ -159,7 +159,7 @@ func (sm *ServiceManager[T]) LookupQueryWithRefresh(
 		}
 
 		// 将数据库结果写入缓存并添加到返回结果
-		redis := GetRedis()
+		redis := sm.Redis()
 		for i := range dbResults {
 			item := &dbResults[i]
 			key := buildKeyFunc(item)
@@ -213,7 +213,7 @@ func (sm *ServiceManager[T]) lookupFromDB(
 	keys []string,
 	opts *LookupQueryOptions,
 ) (map[string]*T, error) {
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 	db = sm.applyTableName(db)
 
 	// 从缓存键中解析 ID 列表
@@ -237,7 +237,7 @@ func (sm *ServiceManager[T]) lookupFromDB(
 
 	// 构建结果映射并写入缓存
 	resultMap := make(map[string]*T)
-	redis := GetRedis()
+	redis := sm.Redis()
 
 	for i := range results {
 		item := &results[i]
@@ -273,7 +273,7 @@ func (sm *ServiceManager[T]) RefreshCache(
 	buildKeyFunc func(*T) string,
 	expiration time.Duration,
 ) error {
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 	db = sm.applyTableName(db)
 
 	if queryFunc != nil {
@@ -286,7 +286,7 @@ func (sm *ServiceManager[T]) RefreshCache(
 	}
 
 	// 批量写入缓存
-	redis := GetRedis()
+	redis := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	cacheItems := make(map[string]interface{})
@@ -316,7 +316,7 @@ func (sm *ServiceManager[T]) InvalidateCache(ctx context.Context, keys ...string
 		return nil
 	}
 
-	redis := GetRedis()
+	redis := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	if err := redis.Del(ctx, keys...).Err(); err != nil {
@@ -328,7 +328,7 @@ func (sm *ServiceManager[T]) InvalidateCache(ctx context.Context, keys ...string
 
 // InvalidateCacheByPattern 根据模式使缓存失效
 func (sm *ServiceManager[T]) InvalidateCacheByPattern(ctx context.Context, pattern string) error {
-	redis := GetRedis()
+	redis := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 

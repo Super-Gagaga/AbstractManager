@@ -20,16 +20,16 @@ type HavingCondition struct {
 
 // QueryOptions 查询配置选项
 type QueryOptions struct {
-	Page            int                    // 页码（从1开始）
-	PageSize        int                    // 每页数量
-	OrderBy         string                 // 排序字段
-	Order           string                 // 排序方向（ASC/DESC）
-	Preload         []string               // 预加载关联
-	Select          []string               // 指定查询字段
-	Distinct        bool                   // 是否去重
-	Group           string                 // 分组字段
-	Having          map[string]interface{} // Having 条件（简易写法：仅支持 = 运算符）
-	HavingConditions []HavingCondition     // Having 条件（结构化写法：支持全部运算符，推荐）
+	Page             int                    // 页码（从1开始）
+	PageSize         int                    // 每页数量
+	OrderBy          string                 // 排序字段
+	Order            string                 // 排序方向（ASC/DESC）
+	Preload          []string               // 预加载关联
+	Select           []string               // 指定查询字段
+	Distinct         bool                   // 是否去重
+	Group            string                 // 分组字段
+	Having           map[string]interface{} // Having 条件（简易写法：仅支持 = 运算符）
+	HavingConditions []HavingCondition      // Having 条件（结构化写法：支持全部运算符，推荐）
 }
 
 // QueryResult 查询结果
@@ -61,7 +61,7 @@ func (sm *ServiceManager[T]) GetQueryWithoutTransaction(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 应用表名
 	db = sm.applyTableName(db)
@@ -208,7 +208,7 @@ func (sm *ServiceManager[T]) CountQuery(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 应用表名
 	db = sm.applyTableName(db)

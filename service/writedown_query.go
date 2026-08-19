@@ -38,7 +38,7 @@ func (sm *ServiceManager[T]) WritedownQuery(
 		}
 	}
 
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	batchSize := opts.BatchSize
@@ -97,7 +97,7 @@ func (sm *ServiceManager[T]) WritedownWithPipeline(
 		opts = &WritedownQueryOptions{Expiration: 1 * time.Hour, BatchSize: 1000, Overwrite: true}
 	}
 
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 
@@ -142,7 +142,7 @@ func (sm *ServiceManager[T]) WritedownIncremental(
 		return nil
 	}
 
-	redis := GetRedis()
+	redis := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 

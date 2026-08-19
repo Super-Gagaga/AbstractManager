@@ -27,7 +27,7 @@ func (sm *ServiceManager[T]) GetSingle(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 如果需要加锁，使用更高的事务隔离级别
 	if opts != nil && opts.ForUpdate {
@@ -94,7 +94,7 @@ func (sm *ServiceManager[T]) GetSingleOrCreate(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 开启 REPEATABLE READ 事务
 	db = db.Begin()
@@ -149,7 +149,7 @@ func (sm *ServiceManager[T]) GetSingleWithLock(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 开启事务
 	txDB := db.Begin()
@@ -210,7 +210,7 @@ func (sm *ServiceManager[T]) GetFirst(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 应用表名
 	db = sm.applyTableName(db)
@@ -239,7 +239,7 @@ func (sm *ServiceManager[T]) GetLast(
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultDBTimeout())
 	defer cancel()
 
-	db := GetDB().WithContext(ctx)
+	db := sm.DB().WithContext(ctx)
 
 	// 应用表名
 	db = sm.applyTableName(db)

@@ -25,7 +25,7 @@ func (sm *ServiceManager[T]) LookupSingle(
 	key string,
 	opts *LookupSingleOptions,
 ) (*T, error) {
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 
@@ -62,7 +62,7 @@ func (sm *ServiceManager[T]) LookupSingleWithFallback(
 	queryFunc func(*gorm.DB) *gorm.DB,
 	expiration time.Duration,
 ) (*T, error) {
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 
@@ -93,7 +93,7 @@ func (sm *ServiceManager[T]) LookupSingleWithFallback(
 
 // InvalidateSingleCache 使单个缓存失效
 func (sm *ServiceManager[T]) InvalidateSingleCache(ctx context.Context, key string) error {
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	// 🛠️ 修复：.Err() 获取错误，修复 %w 类型报错
@@ -105,7 +105,7 @@ func (sm *ServiceManager[T]) InvalidateSingleCache(ctx context.Context, key stri
 
 // ExistsInCache 检查缓存中是否存在
 func (sm *ServiceManager[T]) ExistsInCache(ctx context.Context, key string) (bool, error) {
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	n, err := rdb.Exists(ctx, key).Result()
@@ -117,7 +117,7 @@ func (sm *ServiceManager[T]) ExistsInCache(ctx context.Context, key string) (boo
 
 // ExtendCacheTTL 延长缓存的过期时间
 func (sm *ServiceManager[T]) ExtendCacheTTL(ctx context.Context, key string, expiration time.Duration) error {
-	rdb := GetRedis()
+	rdb := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	// 🛠️ 修复：使用 .Err() 确保传给 %w的是 error 类型
@@ -144,7 +144,7 @@ func (sm *ServiceManager[T]) InvalidateSingleCacheByID(ctx context.Context, id i
 
 // GetCacheTTL 获取缓存的剩余过期时间
 func (sm *ServiceManager[T]) GetCacheTTL(ctx context.Context, key string) (time.Duration, error) {
-	redisManager := GetRedis()
+	redisManager := sm.Redis()
 	ctx, cancel := util.EnsureTimeout(ctx, util.GetDefaultRedisTimeout())
 	defer cancel()
 	return redisManager.TTL(ctx, key).Result()

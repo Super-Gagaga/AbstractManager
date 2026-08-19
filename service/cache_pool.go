@@ -50,7 +50,24 @@ func GetRedis() *redis.Client {
 	return globalRedisManager.Client
 }
 
+// SetGlobalRedis 注入全局 Redis 客户端(主要用于测试替身或自定义初始化流程);
+// 传 nil 恢复为未初始化状态
+func SetGlobalRedis(client *redis.Client) {
+	if client == nil {
+		globalRedisManager = nil
+		return
+	}
+	globalRedisManager = &RedisManager{Client: client}
+}
+
+// GetRedisManager 返回该实例使用的 RedisManager:优先实例注入,回退全局单例
 func (sm *ServiceManager[T]) GetRedisManager() *RedisManager {
+	if sm.redisClient != nil {
+		return &RedisManager{Client: sm.redisClient}
+	}
+	if globalRedisManager == nil {
+		panic("redis not initialized, call InitRedis first")
+	}
 	return globalRedisManager
 }
 
